@@ -3,7 +3,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import google.generativeai as genai
 from groq import Groq
-from serpapi import GoogleSearch
+from serpapi.google_search import GoogleSearch
 from supabase import create_client
 import json
 import re
