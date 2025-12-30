@@ -11,357 +11,187 @@ import time
 from datetime import datetime, timedelta
 
 # ==========================================
+# 0. secrets safe access (1번)
+# ==========================================
+def sget(section, key, default=None):
+    try:
+        return st.secrets.get(section, {}).get(key, default)
+    except Exception:
+        return default
+
+def sget_required(section, key):
+    v = sget(section, key)
+    if not v:
+        st.error(f"❌ secrets 누락: [{section}] {key}")
+        st.stop()
+    return v
+
+# ==========================================
 # 1. Configuration & Styles
 # ==========================================
 st.set_page_config(layout="wide", page_title="AI Bureau: The Legal Glass", page_icon="⚖️")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #f3f4f6; }
-    .paper-sheet {
-        background-color: white; width: 100%; max-width: 210mm; min-height: 297mm;
-        padding: 25mm; margin: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        font-family: 'Batang', serif; color: #111; line-height: 1.6; position: relative;
-    }
-    .doc-header { text-align: center; font-size: 22pt; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px; }
-    .doc-info { display: flex; justify-content: space-between; font-size: 11pt; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-    .doc-body { font-size: 12pt; text-align: justify; }
-    .doc-footer { text-align: center; font-size: 20pt; font-weight: bold; margin-top: 80px; letter-spacing: 5px; }
-    .stamp { position: absolute; bottom: 85px; right: 80px; border: 3px solid #cc0000; color: #cc0000; padding: 5px 10px; font-size: 14pt; font-weight: bold; transform: rotate(-15deg); opacity: 0.8; border-radius: 5px; }
-    
-    .agent-log { font-family: 'Consolas', monospace; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-    .log-legal { background-color: #eff6ff; color: #1e40af; border-left: 4px solid #3b82f6; }
-    .log-search { background-color: #fff7ed; color: #c2410c; border-left: 4px solid #f97316; }
-    .log-strat { background-color: #f5f3ff; color: #6d28d9; border-left: 4px solid #8b5cf6; }
-    .log-calc { background-color: #f0fdf4; color: #166534; border-left: 4px solid #22c55e; }
-    .log-draft { background-color: #fef2f2; color: #991b1b; border-left: 4px solid #ef4444; }
-    .log-sys { background-color: #f3f4f6; color: #4b5563; border-left: 4px solid #9ca3af; }
-    
-    .strategy-box { 
-        background-color: #fffbeb; border: 2px solid #fcd34d; padding: 20px; 
-        border-radius: 10px; margin-bottom: 20px; color: #451a03; 
-        font-size: 1.05rem; line-height: 1.6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    .strategy-title { font-weight: bold; color: #b45309; margin-bottom: 10px; font-size: 1.2rem; border-bottom: 1px dashed #b45309; padding-bottom: 5px; }
+.stApp { background-color:#f3f4f6; }
+.paper-sheet {
+  background:white; max-width:210mm; min-height:297mm;
+  padding:25mm; margin:auto; box-shadow:0 10px 30px rgba(0,0,0,.1);
+  font-family:'Batang', serif;
+}
+.doc-header { text-align:center; font-size:22pt; font-weight:900; margin-bottom:30px; }
+.doc-info { display:flex; justify-content:space-between; font-size:11pt; border-bottom:2px solid #333; }
+.doc-footer { text-align:center; font-size:20pt; margin-top:80px; }
+.stamp { position:absolute; bottom:85px; right:80px; border:3px solid #c00; color:#c00; transform:rotate(-15deg); }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. Services (Infrastructure)
+# 2. Services
 # ==========================================
-
 class LLMService:
     def __init__(self):
-        self.gemini_key = st.secrets["general"].get("GEMINI_API_KEY")
-        self.groq_key = st.secrets["general"].get("GROQ_API_KEY")
-        self.gemini_models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
-        if self.gemini_key: genai.configure(api_key=self.gemini_key)
-        self.groq_client = Groq(api_key=self.groq_key) if self.groq_key else None
+        self.gemini_key = sget("general", "GEMINI_API_KEY")
+        self.groq_key = sget("general", "GROQ_API_KEY")
+        self.models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+        if self.gemini_key:
+            genai.configure(api_key=self.gemini_key)
+        self.groq = Groq(api_key=self.groq_key) if self.groq_key else None
 
     def _try_gemini(self, prompt, is_json=False, schema=None):
-        for model_name in self.gemini_models:
+        for m in self.models:
             try:
-                model = genai.GenerativeModel(model_name)
-                config = genai.GenerationConfig(response_mime_type="application/json", response_schema=schema) if is_json else None
-                res = model.generate_content(prompt, generation_config=config)
-                return res.text
-            except: continue
-        raise Exception("All Gemini models failed")
+                model = genai.GenerativeModel(m)
+                cfg = genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema=schema
+                ) if is_json else None
+                return model.generate_content(prompt, generation_config=cfg).text
+            except:
+                continue
+        raise Exception("Gemini failed")
 
     def generate_text(self, prompt):
-        try: return self._try_gemini(prompt, is_json=False)
-        except: return self._generate_groq(prompt) if self.groq_client else "AI 모델 오류"
+        try:
+            return self._try_gemini(prompt)
+        except:
+            if not self.groq:
+                return "AI ERROR"
+            return self.groq.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role":"user","content":prompt}],
+                temperature=0.1
+            ).choices[0].message.content
 
     def generate_json(self, prompt, schema=None):
         try:
-            text = self._try_gemini(prompt, is_json=True, schema=schema)
-            return json.loads(text)
+            return json.loads(self._try_gemini(prompt, True, schema))
         except:
-            text = self.generate_text(prompt + "\n\nOutput strictly in JSON.")
-            try: return json.loads(re.search(r'\{.*\}', text, re.DOTALL).group(0))
-            except: return None
-
-    def _generate_groq(self, prompt):
-        try:
-            completion = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
-            )
-            return completion.choices[0].message.content
-        except: return "System Error"
+            txt = self.generate_text(prompt + "\nJSON만 출력")
+            try:
+                return json.loads(re.search(r"\{.*\}", txt, re.DOTALL).group())
+            except:
+                return None
 
 class NationalLawService:
-    """[토큰 최적화 버전] Pinpoint Retrieval"""
+    # 3번: display=5 + 정확도 스코어
     def __init__(self):
-        self.api_id = st.secrets["general"].get("LAW_API_ID")
-        self.base_url = "https://www.law.go.kr/DRF/lawSearch.do"
+        self.api_id = sget_required("general", "LAW_API_ID")
+        self.search_url = "https://www.law.go.kr/DRF/lawSearch.do"
         self.detail_url = "https://www.law.go.kr/DRF/lawService.do"
 
     def get_specific_article(self, law_name, article_num):
-        """
-        AI가 추측한 법령명과 조 번호를 받아, 해당 조항만 콕 집어서 가져옴 (토큰 절약의 핵심)
-        """
-        if not self.api_id: return "(LAW_API_ID 없음: 검증 불가)"
-
         try:
-            # 1. 법령 ID 찾기
-            params = {"OC": self.api_id, "target": "law", "type": "XML", "query": law_name, "display": 1}
-            res = requests.get(self.base_url, params=params, timeout=5)
-            root = ET.fromstring(res.content)
-            law_node = root.find(".//law")
-            
-            if law_node is None: return f"'{law_name}'을(를) 법령센터에서 찾을 수 없습니다."
-            
-            law_id = law_node.find("법령일련번호").text
-            official_name = law_node.find("법령명한글").text
-            
-            # 2. 상세 본문 가져오기
-            d_params = {"OC": self.api_id, "target": "law", "type": "XML", "MST": law_id}
-            d_res = requests.get(self.detail_url, params=d_params, timeout=10)
-            d_root = ET.fromstring(d_res.content)
-            
-            # 3. [핵심] '제32조' 같은 조 번호로 필터링 (Pinpoint)
-            # article_num 예시: "32", "제32조"
-            target_num = re.sub(r'[^0-9]', '', str(article_num)) # 숫자만 추출
-            
-            found_articles = []
-            for article in d_root.findall(".//조문"):
-                # 조문번호 태그 안의 숫자와 비교
-                xml_num = article.find("조문번호").text
-                if xml_num == target_num:
-                    content = article.find("조문내용").text or ""
-                    sub_texts = []
-                    for sub in article.findall(".//항"):
-                        sub_content = sub.find("항내용").text or ""
-                        if sub_content: sub_texts.append(f"  - {sub_content}")
-                    
-                    full_text = f"[{official_name} 제{xml_num}조] {content}"
-                    if sub_texts: full_text += "\n" + "\n".join(sub_texts)
-                    found_articles.append(full_text)
-                    
-            if found_articles:
-                return "\n\n".join(found_articles)
-            else:
-                return f"'{official_name}'에서 제{target_num}조를 찾을 수 없습니다. (폐지되었거나 번호 오류 가능성)"
-                
+            params = {
+                "OC": self.api_id,
+                "target": "law",
+                "type": "XML",
+                "query": law_name,
+                "display": 5
+            }
+            root = ET.fromstring(requests.get(self.search_url, params=params).content)
+            laws = root.findall(".//law")
+            if not laws:
+                return "법령 없음"
+
+            def score(n):
+                nm = n.findtext("법령명한글","")
+                return 100 if nm == law_name else 50 if law_name in nm else 0
+
+            law = sorted(laws, key=score, reverse=True)[0]
+            mst = law.findtext("법령일련번호")
+            name = law.findtext("법령명한글", law_name)
+
+            d = ET.fromstring(requests.get(self.detail_url, params={
+                "OC": self.api_id, "target": "law", "type": "XML", "MST": mst
+            }).content)
+
+            num = re.sub(r"\D","",str(article_num))
+            for j in d.findall(".//조문"):
+                if j.findtext("조문번호") == num:
+                    txt = j.findtext("조문내용","")
+                    return f"[{name} 제{num}조] {txt}"
+            return "조문 없음"
         except Exception as e:
-            return f"법령 검증 중 오류: {e}"
+            return f"법령 오류: {e}"
 
 class SearchService:
-    def __init__(self): self.api_key = st.secrets["general"].get("SERPAPI_KEY")
-    def search_google(self, query):
-        if not self.api_key: return "API 키 없음"
+    def __init__(self):
+        self.key = sget("general","SERPAPI_KEY")
+
+    def search(self, q):
+        if not self.key:
+            return "검색 비활성"
         try:
-            params = {"engine": "google", "q": query + " 행정처분 판례", "api_key": self.api_key, "num": 3, "hl": "ko", "gl": "kr"}
-            search = GoogleSearch(params)
-            results = search.get_dict().get("organic_results", [])
-            return "\n".join([f"- [{item['title']}]({item['link']}): {item['snippet']}" for item in results]) if results else "결과 없음"
-        except: return "검색 오류"
+            r = GoogleSearch({
+                "engine":"google","q":q+" 행정처분 판례",
+                "api_key":self.key,"hl":"ko","gl":"kr","num":3
+            }).get_dict().get("organic_results",[])
+            return "\n".join(f"- {x['title']}" for x in r) if r else "없음"
+        except:
+            return "검색 오류"
 
 class DatabaseService:
     def __init__(self):
-        try:
-            self.url = st.secrets["supabase"]["SUPABASE_URL"]
-            self.key = st.secrets["supabase"]["SUPABASE_KEY"]
-            self.client = create_client(self.url, self.key)
-            self.is_active = True
-        except: self.is_active = False
-    def save_report(self, user_input, legal_basis, doc_data):
-        if not self.is_active: return "DB 미연결"
-        try:
-            summary_text = json.dumps(doc_data, ensure_ascii=False, indent=2)
-            data = {"situation": user_input, "law_name": legal_basis, "summary": summary_text}
-            self.client.table("law_reports").insert(data).execute()
-            return "저장 성공"
-        except Exception as e: return f"저장 실패({e})"
+        self.url = sget("supabase","SUPABASE_URL")
+        self.key = sget("supabase","SUPABASE_KEY")
+        self.active = bool(self.url and self.key)
+        self.client = create_client(self.url,self.key) if self.active else None
 
-llm_service = LLMService()
+    def save(self, situation, law, doc):
+        if not self.active:
+            return "DB OFF"
+        self.client.table("law_reports").insert({
+            "situation": situation,
+            "law_name": law,
+            "summary": json.dumps(doc, ensure_ascii=False)
+        }).execute()
+        return "OK"
+
+# ==========================================
+# 3. Workflow
+# ==========================================
+llm = LLMService()
 law_api = NationalLawService()
-search_service = SearchService()
-db_service = DatabaseService()
+search_api = SearchService()
+db = DatabaseService()
+
+def run(situation):
+    law = llm.generate_json(f"상황:{situation} 법령/조항 JSON {{law,article_num}}") or {}
+    text = law_api.get_specific_article(law.get("law","도로교통법"), law.get("article_num",32))
+    strategy = llm.generate_text(f"{situation}\n{text}")
+    doc = llm.generate_json(f"공문 JSON 작성\n{situation}\n{text}\n{strategy}") or {}
+    db.save(situation, text, doc)
+    return doc
 
 # ==========================================
-# 3. Domain Layer (Agents - 토큰 절약형)
+# 4. UI
 # ==========================================
-class LegalAgents:
-    @staticmethod
-    def researcher(situation):
-        """
-        [토큰 절약형 로직]
-        1. LLM (Low Token): "이 상황은 무슨 법 몇 조 같아?" (추론)
-        2. API: "그 조항 텍스트만 가져와" (검증)
-        3. LLM: "이 텍스트 맞네. 이거 써." (확정)
-        """
-        # Step 1. LLM의 지식으로 '법령명'과 '조항번호' 추론 (JSON 출력)
-        guess_prompt = f"""
-        상황: "{situation}"
-        이 상황에 적용될 가장 유력한 대한민국 법령명과 조항 번호(숫자만)를 추론하여 JSON으로 출력하시오.
-        잘 모르겠으면 가장 일반적인 법령을 대시오.
-        
-        Format: {{ "law": "도로교통법", "article_num": 32 }}
-        """
-        try:
-            guess = llm_service.generate_json(guess_prompt)
-            law_name = guess.get("law", "도로교통법")
-            article_num = guess.get("article_num", 32)
-        except:
-            law_name = "도로교통법"
-            article_num = 32
-            
-        # Step 2. API로 해당 조항만 핀셋 검증 (Fact Check)
-        # 여기서 전체 법령을 다 가져오는 게 아니라, 위에서 추론한 '제32조'만 가져옵니다.
-        verified_text = law_api.get_specific_article(law_name, article_num)
-        
-        # Step 3. 검증된 텍스트 리턴
-        return verified_text
+st.title("🏢 AI 행정관 Pro")
 
-    @staticmethod
-    def strategist(situation, legal_basis, search_results):
-        prompt = f"""
-        [상황]: {situation}
-        [검증된 법적 근거]: {legal_basis}
-        [유사 사례]: {search_results}
-        
-        위 정보를 종합하여 **업무 처리 전략(Strategy)**을 수립하세요. (마크다운)
-        1. **처리 방향**: (강경/계도/반려 등)
-        2. **핵심 주의사항**: (절차적 흠결 방지)
-        3. **대응 논리**: (민원인 반발 시)
-        """
-        return llm_service.generate_text(prompt)
+q = st.text_area("업무 내용")
 
-    @staticmethod
-    def clerk(situation, legal_basis):
-        today = datetime.now()
-        prompt = f"오늘: {today.strftime('%Y-%m-%d')}, 법령: {legal_basis}. 법적 의견제출 기한(일수) 숫자만 출력. (기본 15)"
-        try:
-            res = llm_service.generate_text(prompt)
-            days = int(re.sub(r'[^0-9]', '', res))
-        except: days = 15
-        deadline = today + timedelta(days=days)
-        return {
-            "today_str": today.strftime("%Y. %m. %d."),
-            "deadline_str": deadline.strftime("%Y. %m. %d."),
-            "days_added": days,
-            "doc_num": f"행정-{today.strftime('%Y')}-{int(time.time())%1000:03d}호"
-        }
-
-    @staticmethod
-    def drafter(situation, legal_basis, meta_info, strategy):
-        doc_schema = {
-            "type": "OBJECT",
-            "properties": {
-                "title": {"type": "STRING"}, "receiver": {"type": "STRING"},
-                "body_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}},
-                "department_head": {"type": "STRING"}
-            },
-            "required": ["title", "receiver", "body_paragraphs", "department_head"]
-        }
-        prompt = f"""
-        베테랑 서기입니다. 공문서를 작성하세요.
-        상황: {situation}, 검증된 근거: {legal_basis}, 기한: {meta_info['deadline_str']}
-        전략: {strategy}
-        작성원칙: 정중하고 단호하게. 개인정보 마스킹.
-        """
-        return llm_service.generate_json(prompt, schema=doc_schema)
-
-# ==========================================
-# 4. Workflow
-# ==========================================
-def run_workflow(user_input):
-    log_placeholder = st.empty()
-    logs = []
-    def add_log(msg, style="sys"):
-        logs.append(f"<div class='agent-log log-{style}'>{msg}</div>")
-        log_placeholder.markdown("".join(logs), unsafe_allow_html=True)
-        time.sleep(0.3)
-
-    # 1. 리서치 (역방향: 추론 -> 검증)
-    add_log("🤔 Phase 1: AI가 법령을 추론하고 API로 검증합니다...", "legal")
-    legal_basis = LegalAgents.researcher(user_input)
-    
-    add_log("🌍 Phase 1-2: 구글 검색(판례/사례) 조회 중...", "search")
-    search_results = search_service.search_google(user_input)
-    
-    with st.expander("✅ [팩트체크] 검증된 법령 및 사례", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1: st.info(f"**API 검증 결과**\n\n{legal_basis}")
-        with col2: st.warning(f"**판례/사례**\n\n{search_results}")
-
-    # 2. 전략 수립
-    add_log("🧠 Phase 2: 업무 처리 전략 수립...", "strat")
-    strategy = LegalAgents.strategist(user_input, legal_basis, search_results)
-    
-    st.markdown(f"""<div class="strategy-box"><div class="strategy-title">🧭 AI 주무관의 업무 가이드라인</div>{strategy}</div>""", unsafe_allow_html=True)
-
-    # 3. 문서 작성
-    add_log("✍️ Phase 3: 문서 작성 및 기한 산정...", "draft")
-    meta_info = LegalAgents.clerk(user_input, legal_basis)
-    doc_data = LegalAgents.drafter(user_input, legal_basis, meta_info, strategy)
-    
-    # 4. 저장
-    add_log("💾 law_reports 테이블에 저장 중...", "sys")
-    save_msg = db_service.save_report(user_input, legal_basis, doc_data)
-    
-    add_log(f"✅ 완료 ({save_msg})", "sys")
-    time.sleep(1)
-    log_placeholder.empty()
-
-    return doc_data, meta_info
-
-# ==========================================
-# 5. Main UI
-# ==========================================
-def main():
-    col_left, col_right = st.columns([1, 1.2])
-
-    with col_left:
-        st.title("🏢 AI 행정관 Pro")
-        st.caption("Token Optimized: Reasoning -> Retrieval")
-        st.markdown("---")
-        
-        user_input = st.text_area("업무 내용", height=150, placeholder="예: 아파트 단지 내 개인형 이동장치 수거 안내문 작성해줘")
-        
-        if st.button("⚡ 실행", type="primary", use_container_width=True):
-            if not user_input:
-                st.warning("내용을 입력하세요.")
-            else:
-                try:
-                    with st.spinner("처리 중..."):
-                        doc, meta = run_workflow(user_input)
-                        st.session_state['final_doc'] = (doc, meta)
-                except Exception as e:
-                    st.error(f"오류: {e}")
-
-    with col_right:
-        if 'final_doc' in st.session_state:
-            doc, meta = st.session_state['final_doc']
-            if doc:
-                html_content = f"""
-                <div class="paper-sheet">
-                    <div class="stamp">직인생략</div>
-                    <div class="doc-header">{doc.get('title', '공 문 서')}</div>
-                    <div class="doc-info">
-                        <span>문서번호: {meta['doc_num']}</span>
-                        <span>시행일자: {meta['today_str']}</span>
-                        <span>수신: {doc.get('receiver', '수신자 참조')}</span>
-                    </div>
-                    <hr style="border: 1px solid black; margin-bottom: 30px;">
-                    <div class="doc-body">
-                """
-                paragraphs = doc.get('body_paragraphs', [])
-                if isinstance(paragraphs, str): paragraphs = [paragraphs]
-                for p in paragraphs:
-                    html_content += f"<p style='margin-bottom: 15px;'>{p}</p>"
-                html_content += f"""
-                    </div>
-                    <div class="doc-footer">{doc.get('department_head', '행정기관장')}</div>
-                </div>
-                """
-                st.markdown(html_content, unsafe_allow_html=True)
-                st.download_button(label="🖨️ 다운로드", data=html_content, file_name="공문서.html", mime="text/html", use_container_width=True)
-        else:
-            st.markdown("<div style='text-align:center;padding:100px;color:#aaa;'><h3>📄 Preview</h3></div>", unsafe_allow_html=True)
-
-if __name__ == "__main__":
-    main()
+if st.button("실행"):
+    with st.spinner("처리중"):
+        doc = run(q)
+        st.json(doc)
