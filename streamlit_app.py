@@ -18,10 +18,20 @@ st.set_page_config(layout="wide", page_title="AI Bureau: The Legal Glass", page_
 st.markdown("""
 <style>
     .stApp { background-color: #f3f4f6; }
+    
+    /* A4 Paper Style */
     .paper-sheet {
-        background-color: white; width: 100%; max-width: 210mm; min-height: 297mm;
-        padding: 25mm; margin: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        font-family: 'Batang', serif; color: #111; line-height: 1.6; position: relative;
+        background-color: white;
+        width: 100%;
+        max-width: 210mm;
+        min-height: 297mm;
+        padding: 25mm;
+        margin: auto;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        font-family: 'Batang', serif;
+        color: #111;
+        line-height: 1.6;
+        position: relative;
     }
     .doc-header { text-align: center; font-size: 22pt; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px; }
     .doc-info { display: flex; justify-content: space-between; font-size: 11pt; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
@@ -29,6 +39,7 @@ st.markdown("""
     .doc-footer { text-align: center; font-size: 20pt; font-weight: bold; margin-top: 80px; letter-spacing: 5px; }
     .stamp { position: absolute; bottom: 85px; right: 80px; border: 3px solid #cc0000; color: #cc0000; padding: 5px 10px; font-size: 14pt; font-weight: bold; transform: rotate(-15deg); opacity: 0.8; border-radius: 5px; }
     
+    /* Logs & Strategy Box */
     .agent-log { font-family: 'Consolas', monospace; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
     .log-legal { background-color: #eff6ff; color: #1e40af; border-left: 4px solid #3b82f6; }
     .log-search { background-color: #fff7ed; color: #c2410c; border-left: 4px solid #f97316; }
@@ -38,16 +49,21 @@ st.markdown("""
     .log-sys { background-color: #f3f4f6; color: #4b5563; border-left: 4px solid #9ca3af; }
     
     .strategy-box { 
-        background-color: #fffbeb; border: 2px solid #fcd34d; padding: 20px; 
-        border-radius: 10px; margin-bottom: 20px; color: #451a03; 
-        font-size: 1.05rem; line-height: 1.6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        background-color: #fffbeb; 
+        border: 2px solid #fcd34d; 
+        padding: 20px; 
+        border-radius: 10px; 
+        margin-bottom: 20px;
+        color: #451a03;
+        font-size: 1.05rem;
+        line-height: 1.6;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-    .strategy-title { font-weight: bold; color: #b45309; margin-bottom: 10px; font-size: 1.2rem; border-bottom: 1px dashed #b45309; padding-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. Services (Infrastructure)
+# 2. Infrastructure Layer (Services)
 # ==========================================
 
 class LLMService:
@@ -55,6 +71,7 @@ class LLMService:
         self.gemini_key = st.secrets["general"].get("GEMINI_API_KEY")
         self.groq_key = st.secrets["general"].get("GROQ_API_KEY")
         self.gemini_models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+        
         if self.gemini_key: genai.configure(api_key=self.gemini_key)
         self.groq_client = Groq(api_key=self.groq_key) if self.groq_key else None
 
@@ -92,71 +109,58 @@ class LLMService:
         except: return "System Error"
 
 class NationalLawService:
-    """[토큰 최적화 버전] Pinpoint Retrieval"""
+    """[NEW] 국가법령정보센터 공식 API 연동"""
     def __init__(self):
-        self.api_id = st.secrets["general"].get("LAW_API_ID")
+        self.api_id = st.secrets["general"].get("LAW_API_ID") # secrets에 ID 필요
         self.base_url = "https://www.law.go.kr/DRF/lawSearch.do"
         self.detail_url = "https://www.law.go.kr/DRF/lawService.do"
 
-    def get_specific_article(self, law_name, article_num):
-        """
-        AI가 추측한 법령명과 조 번호를 받아, 해당 조항만 콕 집어서 가져옴 (토큰 절약의 핵심)
-        """
-        if not self.api_id: return "(LAW_API_ID 없음: 검증 불가)"
-
+    def get_law_text(self, keyword):
+        """법령명을 검색하여 본문(조문) 일부를 가져옴"""
+        if not self.api_id:
+            return "(시스템 알림: LAW_API_ID가 설정되지 않아 LLM 지식으로 대체합니다.)"
+            
         try:
-            # 1. 법령 ID 찾기
-            params = {"OC": self.api_id, "target": "law", "type": "XML", "query": law_name, "display": 1}
+            # 1. 법령 검색 (XML)
+            params = {"OC": self.api_id, "target": "law", "type": "XML", "query": keyword, "display": 1}
             res = requests.get(self.base_url, params=params, timeout=5)
             root = ET.fromstring(res.content)
-            law_node = root.find(".//law")
             
-            if law_node is None: return f"'{law_name}'을(를) 법령센터에서 찾을 수 없습니다."
+            law_node = root.find(".//law")
+            if law_node is None: return "검색된 법령이 없습니다."
             
             law_id = law_node.find("법령일련번호").text
-            official_name = law_node.find("법령명한글").text
+            law_name = law_node.find("법령명한글").text
             
-            # 2. 상세 본문 가져오기
+            # 2. 상세 본문 조회
             d_params = {"OC": self.api_id, "target": "law", "type": "XML", "MST": law_id}
             d_res = requests.get(self.detail_url, params=d_params, timeout=10)
             d_root = ET.fromstring(d_res.content)
             
-            # 3. [핵심] '제32조' 같은 조 번호로 필터링 (Pinpoint)
-            # article_num 예시: "32", "제32조"
-            target_num = re.sub(r'[^0-9]', '', str(article_num)) # 숫자만 추출
-            
-            found_articles = []
-            for article in d_root.findall(".//조문"):
-                # 조문번호 태그 안의 숫자와 비교
-                xml_num = article.find("조문번호").text
-                if xml_num == target_num:
-                    content = article.find("조문내용").text or ""
-                    sub_texts = []
-                    for sub in article.findall(".//항"):
-                        sub_content = sub.find("항내용").text or ""
-                        if sub_content: sub_texts.append(f"  - {sub_content}")
-                    
-                    full_text = f"[{official_name} 제{xml_num}조] {content}"
-                    if sub_texts: full_text += "\n" + "\n".join(sub_texts)
-                    found_articles.append(full_text)
-                    
-            if found_articles:
-                return "\n\n".join(found_articles)
-            else:
-                return f"'{official_name}'에서 제{target_num}조를 찾을 수 없습니다. (폐지되었거나 번호 오류 가능성)"
+            # 3. 조문 텍스트 추출 (앞부분 15,000자만 - 토큰 절약)
+            articles = []
+            for article in d_root.findall(".//조문")[:30]: # 상위 30개 조항만 예시로
+                num = article.find("조문번호").text or ""
+                content = article.find("조문내용").text or ""
+                articles.append(f"[제{num}조] {content}")
                 
+            return f"공식 법령명: {law_name}\n\n" + "\n".join(articles)
+            
         except Exception as e:
-            return f"법령 검증 중 오류: {e}"
+            return f"법령 API 호출 오류: {e}"
 
 class SearchService:
-    def __init__(self): self.api_key = st.secrets["general"].get("SERPAPI_KEY")
+    """구글 검색 (유사 사례/판례용)"""
+    def __init__(self):
+        self.api_key = st.secrets["general"].get("SERPAPI_KEY")
+
     def search_google(self, query):
         if not self.api_key: return "API 키 없음"
         try:
-            params = {"engine": "google", "q": query + " 행정처분 판례", "api_key": self.api_key, "num": 3, "hl": "ko", "gl": "kr"}
+            params = {"engine": "google", "q": query + " 행정처분 판례 사례", "api_key": self.api_key, "num": 3, "hl": "ko", "gl": "kr"}
             search = GoogleSearch(params)
             results = search.get_dict().get("organic_results", [])
-            return "\n".join([f"- [{item['title']}]({item['link']}): {item['snippet']}" for item in results]) if results else "결과 없음"
+            return "\n".join([f"- {item['title']}: {item['snippet']}" for item in results]) if results else "결과 없음"
         except: return "검색 오류"
 
 class DatabaseService:
@@ -167,6 +171,7 @@ class DatabaseService:
             self.client = create_client(self.url, self.key)
             self.is_active = True
         except: self.is_active = False
+
     def save_report(self, user_input, legal_basis, doc_data):
         if not self.is_active: return "DB 미연결"
         try:
@@ -182,48 +187,47 @@ search_service = SearchService()
 db_service = DatabaseService()
 
 # ==========================================
-# 3. Domain Layer (Agents - 토큰 절약형)
+# 3. Domain Layer (Agents - 로직 이원화)
 # ==========================================
 class LegalAgents:
     @staticmethod
     def researcher(situation):
         """
-        [토큰 절약형 로직]
-        1. LLM (Low Token): "이 상황은 무슨 법 몇 조 같아?" (추론)
-        2. API: "그 조항 텍스트만 가져와" (검증)
-        3. LLM: "이 텍스트 맞네. 이거 써." (확정)
+        [이원화 로직]
+        1. LLM이 '검색할 법령 키워드' 추출 (예: '도로교통법')
+        2. Law API가 실제 법령 텍스트(Official Text)를 가져옴
+        3. LLM이 그 텍스트 안에서 상황에 맞는 조항을 Pick
         """
-        # Step 1. LLM의 지식으로 '법령명'과 '조항번호' 추론 (JSON 출력)
-        guess_prompt = f"""
-        상황: "{situation}"
-        이 상황에 적용될 가장 유력한 대한민국 법령명과 조항 번호(숫자만)를 추론하여 JSON으로 출력하시오.
-        잘 모르겠으면 가장 일반적인 법령을 대시오.
+        # Step 1. 키워드 추출
+        kw_prompt = f"상황: '{situation}'\n이 상황에 적용될 가장 유력한 대한민국 법령 이름 1개만 단어로 출력. (예: 도로교통법)"
+        target_law = llm_service.generate_text(kw_prompt).strip()
         
-        Format: {{ "law": "도로교통법", "article_num": 32 }}
+        # Step 2. 공식 API 호출
+        official_text = law_api.get_law_text(target_law)
+        
+        # Step 3. 조항 추출 (Context 주입)
+        final_prompt = f"""
+        당신은 법제관입니다.
+        
+        [민원 상황]: {situation}
+        [국가법령정보센터 원문 데이터]: 
+        {official_text} (...생략...)
+        
+        위 원문 데이터를 근거로, 이 상황에 적용할 정확한 '법령명'과 '제O조(조문 제목)'을 찾아내세요.
+        만약 원문에 정확한 조항이 없다면 당신의 지식을 보태어 가장 적절한 조항을 제시하세요.
         """
-        try:
-            guess = llm_service.generate_json(guess_prompt)
-            law_name = guess.get("law", "도로교통법")
-            article_num = guess.get("article_num", 32)
-        except:
-            law_name = "도로교통법"
-            article_num = 32
-            
-        # Step 2. API로 해당 조항만 핀셋 검증 (Fact Check)
-        # 여기서 전체 법령을 다 가져오는 게 아니라, 위에서 추론한 '제32조'만 가져옵니다.
-        verified_text = law_api.get_specific_article(law_name, article_num)
-        
-        # Step 3. 검증된 텍스트 리턴
-        return verified_text
+        return llm_service.generate_text(final_prompt).strip()
 
     @staticmethod
     def strategist(situation, legal_basis, search_results):
         prompt = f"""
+        당신은 행정 주무관입니다.
         [상황]: {situation}
-        [검증된 법적 근거]: {legal_basis}
+        [법적 근거]: {legal_basis}
         [유사 사례]: {search_results}
         
-        위 정보를 종합하여 **업무 처리 전략(Strategy)**을 수립하세요. (마크다운)
+        위 정보를 종합하여 **업무 처리 전략(Strategy)**을 수립하세요.
+        다음 3가지를 포함하여 마크다운으로 작성하세요:
         1. **처리 방향**: (강경/계도/반려 등)
         2. **핵심 주의사항**: (절차적 흠결 방지)
         3. **대응 논리**: (민원인 반발 시)
@@ -233,11 +237,15 @@ class LegalAgents:
     @staticmethod
     def clerk(situation, legal_basis):
         today = datetime.now()
-        prompt = f"오늘: {today.strftime('%Y-%m-%d')}, 법령: {legal_basis}. 법적 의견제출 기한(일수) 숫자만 출력. (기본 15)"
+        prompt = f"""
+        오늘: {today.strftime('%Y-%m-%d')}, 법령: {legal_basis}
+        법적/통상적 의견제출 기한(일수) 숫자만 출력. (기본 15)
+        """
         try:
             res = llm_service.generate_text(prompt)
             days = int(re.sub(r'[^0-9]', '', res))
         except: days = 15
+        
         deadline = today + timedelta(days=days)
         return {
             "today_str": today.strftime("%Y. %m. %d."),
@@ -251,7 +259,8 @@ class LegalAgents:
         doc_schema = {
             "type": "OBJECT",
             "properties": {
-                "title": {"type": "STRING"}, "receiver": {"type": "STRING"},
+                "title": {"type": "STRING"},
+                "receiver": {"type": "STRING"},
                 "body_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}},
                 "department_head": {"type": "STRING"}
             },
@@ -259,14 +268,14 @@ class LegalAgents:
         }
         prompt = f"""
         베테랑 서기입니다. 공문서를 작성하세요.
-        상황: {situation}, 검증된 근거: {legal_basis}, 기한: {meta_info['deadline_str']}
+        상황: {situation}, 법령: {legal_basis}, 기한: {meta_info['deadline_str']}
         전략: {strategy}
         작성원칙: 정중하고 단호하게. 개인정보 마스킹.
         """
         return llm_service.generate_json(prompt, schema=doc_schema)
 
 # ==========================================
-# 4. Workflow
+# 4. Workflow (Orchestration)
 # ==========================================
 def run_workflow(user_input):
     log_placeholder = st.empty()
@@ -276,23 +285,29 @@ def run_workflow(user_input):
         log_placeholder.markdown("".join(logs), unsafe_allow_html=True)
         time.sleep(0.3)
 
-    # 1. 리서치 (역방향: 추론 -> 검증)
-    add_log("🤔 Phase 1: AI가 법령을 추론하고 API로 검증합니다...", "legal")
+    # 1. 리서치 (API 이원화)
+    add_log("📡 Phase 1: 국가법령정보센터(API) 원문 조회 중...", "legal")
     legal_basis = LegalAgents.researcher(user_input)
     
     add_log("🌍 Phase 1-2: 구글 검색(판례/사례) 조회 중...", "search")
     search_results = search_service.search_google(user_input)
     
-    with st.expander("✅ [팩트체크] 검증된 법령 및 사례", expanded=True):
+    with st.expander("✅ [팩트체크] 법령 원문 및 유사 사례", expanded=True):
         col1, col2 = st.columns(2)
-        with col1: st.info(f"**API 검증 결과**\n\n{legal_basis}")
-        with col2: st.warning(f"**판례/사례**\n\n{search_results}")
+        with col1: st.info(f"**법령(law.go.kr)**\n\n{legal_basis}")
+        with col2: st.warning(f"**판례(Google)**\n\n{search_results}")
 
     # 2. 전략 수립
     add_log("🧠 Phase 2: 업무 처리 전략 수립...", "strat")
     strategy = LegalAgents.strategist(user_input, legal_basis, search_results)
     
-    st.markdown(f"""<div class="strategy-box"><div class="strategy-title">🧭 AI 주무관의 업무 가이드라인</div>{strategy}</div>""", unsafe_allow_html=True)
+    # [전략 박스 UI 적용]
+    st.markdown(f"""
+    <div class="strategy-box">
+        <div class="strategy-title">🧭 AI 주무관의 업무 가이드라인</div>
+        {strategy}
+    </div>
+    """, unsafe_allow_html=True)
 
     # 3. 문서 작성
     add_log("✍️ Phase 3: 문서 작성 및 기한 산정...", "draft")
@@ -317,7 +332,7 @@ def main():
 
     with col_left:
         st.title("🏢 AI 행정관 Pro")
-        st.caption("Token Optimized: Reasoning -> Retrieval")
+        st.caption("Law API(Statute) + Google(Case) + Gemini 2.5")
         st.markdown("---")
         
         user_input = st.text_area("업무 내용", height=150, placeholder="예: 아파트 단지 내 개인형 이동장치 수거 안내문 작성해줘")
