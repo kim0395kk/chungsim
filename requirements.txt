@@ -1,7 +1,7 @@
 streamlit
 google-generativeai
 groq
-serpapi
+google-search-results
 supabase
 requests
 xmltodict
