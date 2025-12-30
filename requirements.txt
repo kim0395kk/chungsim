@@ -1,7 +1,6 @@
 streamlit
 google-generativeai
 groq
-google-search-results==2.4.2
-supabase
 requests
+supabase
 xmltodict
