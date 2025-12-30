@@ -1,393 +1,343 @@
-import streamlit as st
+Import streamlit as st
+import requests
+import xml.etree.ElementTree as ET
 import google.generativeai as genai
-from groq import Groq
 from serpapi import GoogleSearch
-import json
 import re
 import time
-from datetime import datetime, timedelta
+import json
+from supabase import create_client
+from groq import Groq 
 
-# ==========================================
-# 1. Configuration & Styles (설정 및 디자인)
-# ==========================================
-st.set_page_config(layout="wide", page_title="AI Bureau: The Legal Glass", page_icon="⚖️")
+# --- 0. 디자인 및 초기 설정 ---
+st.set_page_config(layout="wide", page_title="AI 행정관: The Legal Glass (Ultimate)", page_icon="⚖️")
 
 st.markdown("""
 <style>
-    /* 배경: 차분한 오피스 톤 */
-    .stApp { background-color: #f3f4f6; }
-    
-    /* 결과물: A4 용지 스타일 */
-    .paper-sheet {
-        background-color: white;
-        width: 100%;
-        max-width: 210mm;
-        min-height: 297mm;
-        padding: 25mm;
-        margin: auto;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        font-family: 'Batang', serif;
-        color: #111;
-        line-height: 1.6;
-        position: relative;
+    .stApp { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
+    div[data-testid="stVerticalBlock"] > div[style*="background-color"] {
+        background: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+        backdrop-filter: blur(8px);
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        padding: 25px;
+        margin-bottom: 20px;
     }
-    
-    /* 공문서 내부 스타일 */
-    .doc-header { text-align: center; font-size: 22pt; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px; }
-    .doc-info { display: flex; justify-content: space-between; font-size: 11pt; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-    .doc-body { font-size: 12pt; text-align: justify; }
-    .doc-footer { text-align: center; font-size: 20pt; font-weight: bold; margin-top: 80px; letter-spacing: 5px; }
-    .stamp { position: absolute; bottom: 85px; right: 80px; border: 3px solid #cc0000; color: #cc0000; padding: 5px 10px; font-size: 14pt; font-weight: bold; transform: rotate(-15deg); opacity: 0.8; border-radius: 5px; }
-    
-    /* 로그 스타일 */
-    .agent-log { font-family: 'Consolas', monospace; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-    .log-legal { background-color: #eff6ff; color: #1e40af; border-left: 4px solid #3b82f6; } /* Blue */
-    .log-search { background-color: #fff7ed; color: #c2410c; border-left: 4px solid #f97316; } /* Orange */
-    .log-strat { background-color: #f5f3ff; color: #6d28d9; border-left: 4px solid #8b5cf6; } /* Purple */
-    .log-calc { background-color: #f0fdf4; color: #166534; border-left: 4px solid #22c55e; } /* Green */
-    .log-draft { background-color: #fef2f2; color: #991b1b; border-left: 4px solid #ef4444; } /* Red */
-    .log-sys { background-color: #f3f4f6; color: #4b5563; border-left: 4px solid #9ca3af; } /* Gray */
-    
-    /* 전략 박스 스타일 */
-    .strategy-box { background-color: #fffbeb; border: 1px solid #fcd34d; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+    h1, h2, h3 { color: #1a237e !important; font-family: 'Helvetica Neue', sans-serif; }
+    strong { color: #1a237e; background-color: rgba(26, 35, 126, 0.1); padding: 2px 4px; border-radius: 4px; }
+    .status-badge { background-color: #dbeafe; color: #1e40af; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: bold; }
+    .groq-badge { background-color: #fce7f3; color: #9d174d; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: bold; border: 1px solid #fbcfe8; }
 </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# 2. Service Layer (Infrastructure)
-# ==========================================
-class LLMService:
+# --- 1. API 연결 및 예외처리 ---
+try:
+    GEMINI_API_KEY = st.secrets["general"]["GEMINI_API_KEY"]
+    LAW_API_ID = st.secrets["general"]["LAW_API_ID"]
+    SERPAPI_KEY = st.secrets["general"]["SERPAPI_KEY"]
+    GROQ_API_KEY = st.secrets["general"].get("GROQ_API_KEY", None)
+
+    try:
+        SUPABASE_URL = st.secrets["supabase"]["SUPABASE_URL"]
+        SUPABASE_KEY = st.secrets["supabase"]["SUPABASE_KEY"]
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        use_db = True
+    except: 
+        use_db = False
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    if GROQ_API_KEY:
+        groq_client = Groq(api_key=GROQ_API_KEY)
+    else:
+        groq_client = None
+
+except Exception as e:
+    st.error(f"🚨 시스템 설정 오류: {e}")
+    st.stop()
+
+# 모델 우선순위 (최신 -> 안정 -> 고성능)
+GEMINI_PRIORITY_LIST = [
+    "gemini-2.0-flash-exp", 
+    "gemini-1.5-flash", 
+    "gemini-1.5-pro"
+]
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+# --- 2. 하이브리드 엔진 (Smart Fallback) ---
+def generate_content_hybrid(prompt, temp=0.1):
     """
-    [Model Hierarchy]
-    1. Gemini 2.5 Flash
-    2. Gemini 2.5 Flash Lite
-    3. Gemini 2.0 Flash
-    4. Groq (Llama 3 Backup)
+    1. Gemini 모델 순차 시도
+    2. 실패 시 Groq(Llama 3.3) 실행 (전문가 페르소나 주입)
     """
-    def __init__(self):
-        self.gemini_key = st.secrets["general"].get("GEMINI_API_KEY")
-        self.groq_key = st.secrets["general"].get("GROQ_API_KEY")
-        
-        # 요청하신 모델 우선순위 리스트
-        self.gemini_models = [
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.0-flash"
-        ]
-        
-        if self.gemini_key:
-            genai.configure(api_key=self.gemini_key)
+    # 1. Gemini 시도
+    for model_name in GEMINI_PRIORITY_LIST:
+        try:
+            model = genai.GenerativeModel(model_name)
+            res = model.generate_content(prompt, request_options={'timeout': 8})
+            return res.text, f"Gemini ({model_name})"
+        except Exception:
+            continue
+
+    # 2. Groq 시도
+    if groq_client:
+        try:
+            # [전문가 모드 시스템 프롬프트]
+            system_role = """
+            당신은 대한민국 최고의 행정법 전문 변호사입니다.
+            1. 판례와 법령에 기반하여 냉철하고 전문적인 어조로 답변하십시오.
+            2. 추상적인 답변 대신 실질적인 해결책을 제시하십시오.
+            3. 답변은 마크다운 형식을 준수하십시오.
+            """
             
-        self.groq_client = Groq(api_key=self.groq_key) if self.groq_key else None
-
-    def _try_gemini(self, prompt, is_json=False, schema=None):
-        for model_name in self.gemini_models:
-            try:
-                # 모델 호출
-                model = genai.GenerativeModel(model_name)
-                config = genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    response_schema=schema
-                ) if is_json else None
-                
-                res = model.generate_content(prompt, generation_config=config)
-                return res.text, model_name
-            except Exception:
-                continue # 다음 모델 시도
-        raise Exception("All Gemini models failed")
-
-    def generate_text(self, prompt):
-        try:
-            text, model_used = self._try_gemini(prompt, is_json=False)
-            return text
-        except Exception:
-            if self.groq_client:
-                return self._generate_groq(prompt)
-            return "시스템 오류: AI 모델 연결 실패"
-
-    def generate_json(self, prompt, schema=None):
-        try:
-            text, model_used = self._try_gemini(prompt, is_json=True, schema=schema)
-            return json.loads(text)
-        except Exception:
-            text = self.generate_text(prompt + "\n\nOutput strictly in JSON.")
-            try:
-                match = re.search(r'\{.*\}', text, re.DOTALL)
-                return json.loads(match.group(0)) if match else None
-            except:
-                return None
-
-    def _generate_groq(self, prompt):
-        try:
-            completion = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
+            chat_completion = groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_role},
+                    {"role": "user", "content": prompt}
+                ],
+                model=GROQ_MODEL,
+                temperature=temp,
+                max_completion_tokens=4000
             )
-            return completion.choices[0].message.content
-        except:
-            return "System Error"
+            return chat_completion.choices[0].message.content, "Groq (Llama 3.3 Expert)"
+        except Exception as groq_e:
+            return f"AI 응답 실패 (Error: {groq_e})", "Fail"
+    else:
+        return "Gemini 연결 실패 및 Groq 키 없음.", "Fail"
 
-class SearchService:
-    """Google Search API (SerpApi) Wrapper"""
-    def __init__(self):
-        self.api_key = st.secrets["general"].get("SERPAPI_KEY")
+# --- 3. [Advanced Logic] 스마트 법령 필터링 ---
 
-    def search_precedents(self, query):
-        if not self.api_key:
-            return "⚠️ 검색 API 키(SERPAPI_KEY)가 설정되지 않아 유사 사례를 조회할 수 없습니다."
+def get_relevant_articles(detail_root, situation):
+    """
+    [Core Tech] 법령 전체를 다 가져오는 게 아니라,
+    사용자 상황(Situation)과 연관된 '법률 용어'가 포함된 조문만 필터링.
+    """
+    # 1. 사용자 입력을 '법률 매핑 키워드'로 변환
+    mapping_keywords = ["금지", "관리", "처분", "과태료", "벌칙", "의무", "안전", "제1조"]
+    
+    # 동적 매핑 추가
+    if "킥보드" in situation or "자전거" in situation or "이동장치" in situation:
+        mapping_keywords.extend(["통행", "장애", "적치", "이동", "도로"])
+    if "주차" in situation:
+        mapping_keywords.extend(["주차", "교통", "방해", "견인"])
+    if "소음" in situation:
+        mapping_keywords.extend(["소음", "진동", "환경", "차음"])
+    if "아파트" in situation or "단지" in situation:
+        mapping_keywords.extend(["입주자", "관리주체", "공용", "전유"])
         
-        try:
-            search_query = f"{query} 행정처분 판례 사례 민원 답변"
-            params = {
-                "engine": "google",
-                "q": search_query,
-                "api_key": self.api_key,
-                "num": 3,
-                "hl": "ko",
-                "gl": "kr"
-            }
-            search = GoogleSearch(params)
-            results = search.get_dict().get("organic_results", [])
+    filtered_articles = []
+    
+    # XML 파싱 및 필터링
+    for a in detail_root.findall(".//조문"):
+        num = a.find('조문번호').text or ""
+        cont = a.find('조문내용').text or ""
+        
+        # 항/호 내용까지 텍스트로 합쳐서 검색
+        full_text = cont
+        sub_clauses = []
+        for sub in a.findall(".//항"):
+            s_num = sub.find('항번호').text or ""
+            s_cont = sub.find('항내용').text or ""
+            full_text += f" {s_cont}"
+            sub_clauses.append(f"  ({s_num}) {s_cont}")
             
-            if not results:
-                return "관련된 유사 사례 검색 결과가 없습니다."
-
-            summary = []
-            for item in results:
-                title = item.get('title', '제목 없음')
-                snippet = item.get('snippet', '내용 없음')
-                link = item.get('link', '#')
-                summary.append(f"- **[{title}]({link})**: {snippet}")
+        # [Filter Logic] 매핑된 키워드가 하나라도 있으면 가져옴
+        if any(kw in full_text for kw in mapping_keywords):
+            article_str = f"[제{num}조] {cont}\n" + "\n".join(sub_clauses)
+            filtered_articles.append(article_str)
             
-            return "\n".join(summary)
-        except Exception as e:
-            return f"검색 중 오류 발생: {e}"
+    # 필터링 결과가 너무 적으면(3개 미만), 기본 조항(앞쪽 30개) 가져옴 (Fallback)
+    if len(filtered_articles) < 3:
+        for a in detail_root.findall(".//조문")[:30]:
+            num = a.find('조문번호').text or ""
+            cont = a.find('조문내용').text or ""
+            filtered_articles.append(f"[제{num}조] {cont}")
+        
+    return filtered_articles
 
-# 싱글톤 인스턴스
-llm_service = LLMService()
-search_service = SearchService()
-
-# ==========================================
-# 3. Agent Layer (Business Logic)
-# ==========================================
-class LegalAgents:
-    @staticmethod
-    def researcher(situation):
-        """Step 1: 법령 탐색"""
-        prompt = f"""
-        <role>당신은 30년 경력의 법제관입니다.</role>
-        <instruction>
-        상황: "{situation}"
-        위 상황에 적용할 가장 정확한 '법령명'과 '관련 조항'을 하나만 찾으시오.
-        반드시 현행 대한민국 법령이어야 하며, 조항 번호까지 명시하세요.
-        (예: 도로교통법 제32조(정차 및 주차의 금지))
-        
-        *주의: 입력에 실명 등 개인정보가 있다면 마스킹하여 처리하세요.
-        </instruction>
-        """
-        return llm_service.generate_text(prompt).strip()
-
-    @staticmethod
-    def strategist(situation, legal_basis, search_results):
-        """Step 2: 전략 수립 (New)"""
-        prompt = f"""
-        당신은 행정 업무 베테랑 '주무관'입니다.
-        
-        [민원 상황]: {situation}
-        [법적 근거]: {legal_basis}
-        [유사 사례/판례]: {search_results}
-        
-        위 정보를 종합하여 이 민원을 처리하기 위한 **대략적인 업무 처리 방향(Strategy)**을 수립하세요.
-        
-        다음 3가지 항목을 포함하여 마크다운으로 작성하세요:
-        1. **처리 방향**: (예: 강경 대응, 계도 위주, 반려 등)
-        2. **핵심 주의사항**: (절차상 놓치면 안 되는 것, 법적 쟁점)
-        3. **예상 반발 및 대응**: (민원인이 항의할 경우 대응 논리)
-        
-        간결하고 명확하게 작성하세요.
-        """
-        return llm_service.generate_text(prompt)
-
-    @staticmethod
-    def clerk(situation, legal_basis):
-        """Step 3: 기한 산정"""
-        today = datetime.now()
-        prompt = f"""
-        오늘: {today.strftime('%Y-%m-%d')}
-        상황: {situation}
-        법령: {legal_basis}
-        위 상황에서 행정처분 사전통지나 이행 명령 시, 법적으로(또는 통상적으로) 부여해야 하는 '이행/의견제출 기간'은 며칠인가?
-        설명 없이 숫자(일수)만 출력하세요. (예: 10, 15, 20)
-        모르겠으면 15를 출력하세요.
-        """
+def search_candidates_from_api(keywords):
+    """[Action] 키워드로 API를 실제 검색하여 실존 법령명 후보 확보"""
+    candidates = set()
+    for kw in keywords:
+        if not kw or len(kw) < 2: continue
         try:
-            res = llm_service.generate_text(prompt)
-            days = int(re.sub(r'[^0-9]', '', res))
-        except:
-            days = 15
-        deadline = today + timedelta(days=days)
-        return {
-            "today_str": today.strftime("%Y. %m. %d."),
-            "deadline_str": deadline.strftime("%Y. %m. %d."),
-            "days_added": days,
-            "doc_num": f"행정-{today.strftime('%Y')}-{int(time.time())%1000:03d}호"
-        }
+            url = f"https://www.law.go.kr/DRF/lawSearch.do?OC={LAW_API_ID}&target=law&type=XML&query={kw}&display=3"
+            res = requests.get(url, timeout=3)
+            root = ET.fromstring(res.content)
+            for law in root.findall(".//law"):
+                candidates.add(law.find("법령명한글").text)
+        except: continue
+    return list(candidates)
 
-    @staticmethod
-    def drafter(situation, legal_basis, meta_info, strategy):
-        """Step 4: 공문서 작성"""
-        doc_schema = {
-            "type": "OBJECT",
-            "properties": {
-                "title": {"type": "STRING", "description": "공문서 제목"},
-                "receiver": {"type": "STRING", "description": "수신인"},
-                "body_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}},
-                "department_head": {"type": "STRING", "description": "발신 명의"}
-            },
-            "required": ["title", "receiver", "body_paragraphs", "department_head"]
-        }
-        
-        prompt = f"""
-        당신은 행정기관의 베테랑 서기입니다. 아래 정보를 바탕으로 완결된 공문서를 작성하세요.
-        
-        [입력 정보]
-        - 민원 상황: {situation}
-        - 법적 근거: {legal_basis}
-        - 시행 일자: {meta_info['today_str']}
-        - 기한: {meta_info['deadline_str']} ({meta_info['days_added']}일)
-        
-        [업무 처리 가이드라인 (전략)]
-        {strategy}
-        
-        [작성 원칙]
-        1. 위 '업무 처리 가이드라인'의 기조(강경/계도 등)를 반영하여 어조를 결정하세요.
-        2. 수신인이 불명확하면 상황에 맞춰 추론하세요.
-        3. 본문 구조: [경위] -> [근거] -> [처분 내용] -> [권리구제 절차]
-        4. 개인정보(이름, 번호)는 반드시 마스킹('OOO') 처리하세요.
-        """
-        return llm_service.generate_json(prompt, schema=doc_schema)
-
-# ==========================================
-# 4. Use Case (Orchestration with Check)
-# ==========================================
-def run_workflow(user_input):
-    log_placeholder = st.empty()
-    logs = []
+def get_law_context_advanced(situation, callback):
+    """[Reasoning -> Action -> Selection -> Filtering]"""
+    callback(10, "🤔 법률 쟁점 분석 및 키워드 추출 중...")
     
-    def add_log(msg, style="sys"):
-        logs.append(f"<div class='agent-log log-{style}'>{msg}</div>")
-        log_placeholder.markdown("".join(logs), unsafe_allow_html=True)
-        time.sleep(0.3)
-
-    # ----------------------------------------
-    # Phase 1: Fact Check & Research
-    # ----------------------------------------
-    add_log("🔍 Phase 1: 법령 및 유사 사례 리서치 중...", "legal")
+    # 1. [Reasoning] JSON 포맷 강제
+    prompt_kw = f"""
+    상황: {situation}
+    관련 법령 검색을 위한 키워드 3개를 JSON으로 추출해.
+    {{ "keywords": ["단어1", "단어2", "단어3"] }}
+    """
+    keywords_json, model_src = generate_content_hybrid(prompt_kw)
     
-    # 병렬 처리 시늉 (순차 실행이지만 사용자에겐 묶어서 보여줌)
-    legal_basis = LegalAgents.researcher(user_input)
-    add_log(f"📜 법적 근거 발견: {legal_basis}", "legal")
-    
-    add_log("🌍 구글 검색 엔진 가동: 유사 사례 판례 수집 중...", "search")
-    search_results = search_service.search_precedents(user_input)
-    
-    # [UI Check Point 1]
-    with st.expander("✅ [검토] 법령 및 유사 사례 확인 (클릭)", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"**적용 법령**\n\n{legal_basis}")
-        with col2:
-            st.warning(f"**유사 사례 검색 결과**\n\n{search_results}")
-
-    # ----------------------------------------
-    # Phase 2: Strategy Setup
-    # ----------------------------------------
-    add_log("🧠 Phase 2: AI 주무관이 업무 처리 방향을 수립합니다...", "strat")
-    strategy = LegalAgents.strategist(user_input, legal_basis, search_results)
-    
-    # [UI Check Point 2]
-    with st.expander("🧭 [방향] 업무 처리 가이드라인 (클릭)", expanded=True):
-        st.markdown(strategy)
-
-    # ----------------------------------------
-    # Phase 3: Execution (Drafting)
-    # ----------------------------------------
-    add_log("📅 Phase 3: 기한 산정 및 공문서 작성 시작...", "calc")
-    meta_info = LegalAgents.clerk(user_input, legal_basis)
-    add_log(f"⏳ 기한 설정: {meta_info['days_added']}일 후 ({meta_info['deadline_str']})", "calc")
-    
-    add_log("✍️ 최종 공문서 조판 중 (Formatting)...", "draft")
-    doc_data = LegalAgents.drafter(user_input, legal_basis, meta_info, strategy)
-    
-    add_log("✅ 모든 행정 절차가 완료되었습니다.", "sys")
-    time.sleep(1)
-    log_placeholder.empty() # 로그 삭제 (깔끔하게)
-
-    return doc_data, meta_info
-
-# ==========================================
-# 5. UI Presentation (Main App)
-# ==========================================
-def main():
-    col_left, col_right = st.columns([1, 1.2])
-
-    with col_left:
-        st.title("🏢 AI 행정관 Pro")
-        st.caption("Gemini 2.5 + Search + Strategy")
-        st.markdown("---")
-        
-        st.markdown("### 🗣️ 업무 지시")
-        user_input = st.text_area(
-            "업무 내용",
-            height=150,
-            placeholder="예시:\n- 아파트 단지 내 소방차 전용구역 불법 주차 차량 과태료 부과 예고 통지서 작성해줘.\n- 식품위생법 위반 식당 영업정지 사전 통지서 써줘.",
-            label_visibility="collapsed"
-        )
-        
-        if st.button("⚡ 스마트 행정 처분 시작", type="primary", use_container_width=True):
-            if not user_input:
-                st.warning("내용을 입력해주세요.")
-            else:
-                try:
-                    with st.spinner("AI 에이전트 팀이 협업 중입니다..."):
-                        doc, meta = run_workflow(user_input)
-                        st.session_state['final_doc'] = (doc, meta)
-                except Exception as e:
-                    st.error(f"시스템 오류 발생: {e}")
-
-        st.markdown("---")
-        st.info("💡 **Tip:** 법령과 사례를 자동으로 분석하여 최적의 처리 방향을 제안합니다.")
-
-    with col_right:
-        if 'final_doc' in st.session_state:
-            doc, meta = st.session_state['final_doc']
-            if doc:
-                html_content = f"""
-                <div class="paper-sheet">
-                    <div class="stamp">직인생략</div>
-                    <div class="doc-header">{doc.get('title', '공 문 서')}</div>
-                    <div class="doc-info">
-                        <span>문서번호: {meta['doc_num']}</span>
-                        <span>시행일자: {meta['today_str']}</span>
-                        <span>수신: {doc.get('receiver', '수신자 참조')}</span>
-                    </div>
-                    <hr style="border: 1px solid black; margin-bottom: 30px;">
-                    <div class="doc-body">
-                """
-                paragraphs = doc.get('body_paragraphs', [])
-                if isinstance(paragraphs, str): paragraphs = [paragraphs]
-                for p in paragraphs:
-                    html_content += f"<p style='margin-bottom: 15px;'>{p}</p>"
-                html_content += f"""
-                    </div>
-                    <div class="doc-footer">{doc.get('department_head', '행정기관장')}</div>
-                </div>
-                """
-                st.markdown(html_content, unsafe_allow_html=True)
-                st.download_button(label="🖨️ 다운로드 (HTML)", data=html_content, file_name="공문서.html", mime="text/html", use_container_width=True)
+    try:
+        json_match = re.search(r'\{.*\}', keywords_json, re.DOTALL)
+        if json_match:
+            keywords = json.loads(json_match.group()).get("keywords", [])
         else:
-            st.markdown("""<div style='text-align: center; padding: 100px; color: #aaa; background: white; border-radius: 10px; border: 2px dashed #ddd;'><h3>📄 Document Preview</h3><p>왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.</p></div>""", unsafe_allow_html=True)
+            keywords = re.findall(r'[가-힣]+', keywords_json)
+            keywords = [k for k in keywords if len(k) > 1][:3]
+    except:
+        keywords = ["행정", "민원"]
 
-if __name__ == "__main__":
-    main()
+    callback(30, f"🔎 ({model_src}) 검색어: {', '.join(keywords)}")
+    
+    # 2. [Action] 법령 검색
+    candidates = search_candidates_from_api(keywords)
+    
+    # 검색 실패 시 광역 검색
+    if not candidates:
+        callback(40, "⚠️ 정밀 검색 실패. 광역 검색 시도...")
+        broad_keywords = ["공동주택", "도로교통", "경범죄", "집합건물"]
+        candidates = search_candidates_from_api(broad_keywords)
+    
+    if not candidates:
+        candidates = ["공동주택관리법", "도로교통법"] # Default
+
+    callback(50, f"⚖️ 최적 법령 선별 중... (후보: {len(candidates)}개)")
+    
+    # 3. [Selection] 최적 법령 선택
+    prompt_sel = f"상황: {situation}\n후보: {', '.join(candidates)}\n가장 적합한 법령 1개 이름만 출력."
+    best_law_name, _ = generate_content_hybrid(prompt_sel)
+    best_law_name = re.sub(r"[\"'\[\]]", "", best_law_name).strip()
+    
+    final_name = next((cand for cand in candidates if cand in best_law_name), candidates[0])
+    
+    callback(70, f"📜 '{final_name}' 데이터 정밀 분석 및 필터링 중...")
+    
+    # 4. [Retrieval + Smart Filtering]
+    try:
+        search_url = f"https://www.law.go.kr/DRF/lawSearch.do?OC={LAW_API_ID}&target=law&type=XML&query={final_name}"
+        root = ET.fromstring(requests.get(search_url, timeout=5).content)
+        mst = root.find(".//MST").text
+        
+        detail_url = f"https://www.law.go.kr/DRF/lawService.do?OC={LAW_API_ID}&target=law&MST={mst}&type=XML"
+        detail_res = requests.get(detail_url, timeout=10)
+        detail_root = ET.fromstring(detail_res.content)
+        
+        # [Google Engineer's Touch] 스마트 필터링 적용
+        articles = get_relevant_articles(detail_root, situation)
+        
+        return final_name, "\n".join(articles)
+        
+    except Exception as e:
+        # [Fallback] API가 터져도 AI 지식으로 답변하게 유도 (빈 리턴 방지)
+        return final_name, f"(시스템 데이터 로드 오류: {e}). 하지만 당신의 법률 지식을 총동원하여 답변하세요."
+
+# --- 4. 검색 및 보고서 작성 ---
+
+def get_search_results(situation, callback):
+    """유사 판례 검색"""
+    callback(80, "🔍 유사 행정 심판 및 판례 검색 중...")
+    try:
+        params = {"engine": "google", "q": f"{situation} 행정처분 판례", "api_key": SERPAPI_KEY, "num": 3}
+        search = GoogleSearch(params)
+        results = search.get_dict().get("organic_results", [])
+        return "\n".join([f"- {item['title']}: {item['snippet']}" for item in results])
+    except: return "(검색 결과 없음)"
+
+def generate_final_report(situation, law_name, law_text, search_text, callback):
+    """최종 보고서 작성 (AI 지식 활용 허용)"""
+    
+    prompt = f"""
+    당신은 대한민국 최고의 행정법 전문 변호사입니다.
+    
+    [민원 내용] {situation}
+    [적용 법령: {law_name}]
+    
+    [법령 데이터 Context]
+    {law_text[:15000]} 
+    
+    [지시사항]
+    1. 위 [법령 데이터 Context]에 관련 조항이 있다면 반드시 인용하세요.
+    2. **중요:** 만약 Context에 딱 맞는 조항이 없거나 데이터가 부족하다면, "데이터 없음"이라고 답하지 말고 **당신이 알고 있는 '{law_name}'의 일반적인 법리와 판례 지식을 총동원하여** 가장 실질적인 답변을 작성하세요.
+    3. 민원인에게 도움이 되는 구체적인 해결책(신고처, 내용증명, 관리규약 확인 등)을 제시하세요.
+    
+    ## 💡 핵심 요약
+    ## 📜 법적 검토 (조항 인용 또는 법리 해석)
+    ## 👣 조치 계획 (현실적 대안)
+    ## 📄 답변 초안
+    """
+    
+    callback(90, "🧠 심층 분석 및 보고서 작성 중...")
+    res, source = generate_content_hybrid(prompt)
+    callback(100, "완료!")
+    return res, source
+
+# --- 5. UI 실행 ---
+
+st.markdown(f"""
+<div style="text-align:center; padding: 20px;">
+    <h1 style="color:#1a237e;">⚖️ AI 행정관: The Legal Glass</h1>
+    <div style="margin-top: 10px;">
+        <span class="status-badge">Main: Gemini (2.0/1.5)</span>
+        <span class="groq-badge">Backup: Groq (Llama 3.3 Expert)</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+with st.container():
+    st.markdown('<div style="height: 20px;"></div>', unsafe_allow_html=True)
+    user_input = st.text_area("민원 상황을 구체적으로 입력해주세요", height=120, placeholder="예: 아파트 단지 내 개인형 이동장치(킥보드) 불법 주차 수거 가능 여부")
+    btn = st.button("🚀 정밀 법리 분석 시작", type="primary", use_container_width=True)
+
+if btn and user_input:
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    def update_status(p, t):
+        progress_bar.progress(p)
+        status_text.caption(f"{t}")
+        time.sleep(0.1)
+
+    # 1. 정밀 법령 탐색 (Advanced Logic)
+    law_name, law_text = get_law_context_advanced(user_input, update_status)
+    
+    # 2. 판례 검색
+    search_text = get_search_results(user_input, update_status)
+    
+    # 3. 보고서 작성
+    final_text, used_source = generate_final_report(user_input, law_name, law_text, search_text, update_status)
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    st.divider()
+    
+    # 결과 알림
+    if "Groq" in used_source:
+        st.warning(f"⚡ 구글 서버 과부하로 **{used_source}**가 분석했습니다.", icon="⚡")
+    elif used_source == "Fail":
+        st.error(f"분석 실패: {final_text}")
+    else:
+        st.success(f"✨ **{used_source}**가 분석을 완료했습니다. (적용법령: {law_name})", icon="🤖")
+
+    # 결과 출력
+    sections = re.split(r'(?=## )', final_text)
+    for section in sections:
+        if not section.strip(): continue
+        with st.container():
+            st.markdown(section)
+
+    # DB 저장 (옵션)
+    if use_db and used_source != "Fail":
+        try:
+            supabase.table("law_reports").insert({
+                "situation": user_input,
+                "law_name": law_name,
+                "summary": final_text[:500],
+                "ai_model": used_source
+            }).execute()
+        except: pass
