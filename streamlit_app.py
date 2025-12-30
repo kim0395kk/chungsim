@@ -89,15 +89,13 @@ st.markdown(
 _TAG_RE = re.compile(r"<[^>]+>")
 
 def _strip_tags(text: str) -> str:
-    # 먼저 HTML 엔티티를 풀고(&lt;div&gt; -> <div>), 그 다음 태그 제거
-    text = unescape(text)
-    text = _TAG_RE.sub("", text)
+    text = unescape(text)           # &lt;div&gt; -> <div>
+    text = _TAG_RE.sub("", text)    # <div ...> 제거
     return text
 
 def _strip_control_chars(text: str) -> str:
-    # 탭/개행은 유지, 나머지 제어문자 제거
     text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
-    text = text.replace("\u200b", "")  # zero-width space
+    text = text.replace("\u200b", "")
     return text
 
 def clean_text(value) -> str:
@@ -106,12 +104,10 @@ def clean_text(value) -> str:
     s = str(value)
     s = _strip_tags(s)
     s = _strip_control_chars(s)
-    # 태그 제거 후에도 남는 꺾쇠 관련 흔적/잔재 정리(안전망)
     s = s.replace("</", "").replace("/>", "").replace("<", "").replace(">", "")
     return s.strip()
 
 def safe_html(value) -> str:
-    # 최종적으로 HTML에 넣는 값은 반드시 escape
     return escape(clean_text(value), quote=False).replace("\n", "<br>")
 
 def ensure_doc_shape(doc):
@@ -143,10 +139,11 @@ def ensure_doc_shape(doc):
     if not cleaned:
         cleaned = fallback["body_paragraphs"]
 
-    # "태그 잔재" 최종 필터(</div> 등이 남으면 제거)
+    # 최종 잔재 필터
     cleaned2 = []
     for p in cleaned:
-        if "</" in p.lower() or "<div" in p.lower() or "class=" in p.lower():
+        low = p.lower()
+        if "</" in low or "<div" in low or "class=" in low:
             continue
         cleaned2.append(p)
     if cleaned2:
@@ -175,10 +172,11 @@ class LLMService:
             "gemini-2.0-flash",
         ]
 
+        self.last_model_used = None  # ✅ 추가: 마지막 사용 모델 기록
+        self.groq_client = Groq(api_key=self.groq_key) if self.groq_key else None
+
         if self.gemini_key:
             genai.configure(api_key=self.gemini_key)
-
-        self.groq_client = Groq(api_key=self.groq_key) if self.groq_key else None
 
     def generate_text(self, prompt: str) -> str:
         last_err = None
@@ -186,6 +184,7 @@ class LLMService:
             try:
                 model = genai.GenerativeModel(model_name)
                 res = model.generate_content(prompt)
+                self.last_model_used = f"Gemini / {model_name}"
                 return (res.text or "").strip()
             except Exception as e:
                 last_err = e
@@ -198,15 +197,18 @@ class LLMService:
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1,
                 )
+                self.last_model_used = "Groq / llama-3.3-70b-versatile"
                 return (completion.choices[0].message.content or "").strip()
-            except:
-                pass
+            except Exception as e:
+                last_err = e
 
+        self.last_model_used = f"LLM 실패 ({last_err})"
         return f"시스템 오류: AI 모델 연결 실패 ({last_err})"
 
     def generate_json(self, prompt: str) -> dict:
-        # JSON이 깨져도 "최대한" 복구: 코드펜스 제거 -> 첫 JSON 객체 추출
-        raw = self.generate_text(prompt + "\n\n[IMPORTANT] Output ONLY valid JSON. No markdown. No code fences.")
+        raw = self.generate_text(
+            prompt + "\n\n[IMPORTANT] Output ONLY valid JSON. No markdown. No code fences."
+        )
         raw2 = re.sub(r"```(?:json)?\s*|\s*```", "", raw, flags=re.IGNORECASE)
         m = re.search(r"\{.*\}", raw2, re.DOTALL)
         if not m:
@@ -258,7 +260,7 @@ class DatabaseService:
         except Exception:
             self.is_active = False
 
-    def save_log(self, user_input, legal_basis, strategy, doc_data):
+    def save_log(self, user_input, legal_basis, strategy, doc_data, model_usage=None):
         if not self.is_active:
             return "DB 미연결 (저장 건너뜀)"
         try:
@@ -267,6 +269,7 @@ class DatabaseService:
                 "legal_basis": legal_basis,
                 "strategy": strategy,
                 "final_doc": json.dumps(doc_data, ensure_ascii=False),
+                "model_usage": json.dumps(model_usage or {}, ensure_ascii=False),
                 "created_at": datetime.now().isoformat(),
             }
             self.client.table("law_logs").insert(data).execute()
@@ -295,7 +298,6 @@ class LegalAgents:
 *주의: 입력에 실명 등 개인정보가 있다면 마스킹하여 처리하세요.
 </instruction>
 """
-        # "원문 그대로" 유지 (정화하지 않고 그대로 반환/표시)
         return llm_service.generate_text(prompt).strip()
 
     @staticmethod
@@ -371,12 +373,12 @@ class LegalAgents:
 4. 개인정보(이름, 번호)는 반드시 마스킹('OOO')
 
 [출력 형식: JSON ONLY]
-{{
+{
   "title": "공문 제목",
   "receiver": "수신인",
   "body_paragraphs": ["문단1", "문단2", "문단3"],
   "department_head": "발신 명의"
-}}
+}
 """
         obj = llm_service.generate_json(prompt)
         return ensure_doc_shape(obj)
@@ -387,6 +389,7 @@ class LegalAgents:
 def run_workflow(user_input):
     log_placeholder = st.empty()
     logs = []
+    model_usage = {}  # ✅ 단계별 실제 사용 모델 기록
 
     def add_log(msg, style="sys"):
         style = style if style in ["legal", "search", "strat", "calc", "draft", "sys"] else "sys"
@@ -396,7 +399,8 @@ def run_workflow(user_input):
 
     add_log("🔍 Phase 1: 법령 및 유사 사례 리서치 중...", "legal")
     legal_basis = LegalAgents.researcher(user_input)
-    add_log("📜 법적 근거 발견(원문 유지)", "legal")
+    model_usage["법령 리서치"] = llm_service.last_model_used
+    add_log(f"🤖 사용 모델: {llm_service.last_model_used}", "sys")
 
     add_log("🌍 구글 검색 엔진 가동: 유사 사례 판례 수집 중...", "search")
     search_results = search_service.search_precedents(user_input)
@@ -404,13 +408,14 @@ def run_workflow(user_input):
     with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            # "원문 그대로" 출력
             st.info(f"**적용 법령(원문)**\n\n{legal_basis}")
         with c2:
             st.warning(f"**유사 사례 검색 결과**\n\n{search_results}")
 
     add_log("🧠 Phase 2: AI 주무관이 업무 처리 방향을 수립합니다...", "strat")
     strategy = LegalAgents.strategist(user_input, legal_basis, search_results)
+    model_usage["전략 수립"] = llm_service.last_model_used
+    add_log(f"🤖 사용 모델: {llm_service.last_model_used}", "sys")
 
     with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
         st.markdown(strategy)
@@ -421,18 +426,20 @@ def run_workflow(user_input):
 
     add_log("✍️ 최종 공문서 조판 중...", "draft")
     doc_data = LegalAgents.drafter(user_input, legal_basis, meta_info, strategy)
+    model_usage["공문 작성"] = llm_service.last_model_used
+    add_log(f"🤖 사용 모델: {llm_service.last_model_used}", "sys")
 
-    # 여기서도 한번 더 강제 정화 (이중 안전망)
+    # 강제 정화 (이중 안전망)
     doc_data = ensure_doc_shape(doc_data)
 
     add_log("💾 업무 기록을 데이터베이스(Supabase)에 저장 중...", "sys")
-    save_result = db_service.save_log(user_input, legal_basis, strategy, doc_data)
+    save_result = db_service.save_log(user_input, legal_basis, strategy, doc_data, model_usage=model_usage)
 
     add_log(f"✅ 모든 행정 절차가 완료되었습니다. ({save_result})", "sys")
     time.sleep(0.6)
     log_placeholder.empty()
 
-    return doc_data, meta_info, legal_basis
+    return doc_data, meta_info, legal_basis, model_usage
 
 # ==========================================
 # 6) UI
@@ -442,7 +449,7 @@ def main():
 
     with col_left:
         st.title("🏢 AI 행정관 Pro")
-        st.caption("Gemini 2.5 + Search + Strategy + DB (HTML 깨짐 방지: sanitize + iframe)")
+        st.caption("Gemini 2.5 + Search + Strategy + DB (HTML 깨짐 방지 + 사용 모델 표시)")
         st.markdown("---")
 
         user_input = st.text_area(
@@ -458,7 +465,7 @@ def main():
             clear_btn = st.button("🧹 초기화", use_container_width=True)
 
         if clear_btn:
-            for k in ["final_doc", "final_meta", "final_legal"]:
+            for k in ["final_doc", "final_meta", "final_legal", "final_models"]:
                 st.session_state.pop(k, None)
             st.rerun()
 
@@ -468,15 +475,21 @@ def main():
             else:
                 try:
                     with st.spinner("AI 에이전트 팀이 협업 중입니다..."):
-                        doc, meta, legal = run_workflow(user_input)
+                        doc, meta, legal, models = run_workflow(user_input)
                         st.session_state["final_doc"] = doc
                         st.session_state["final_meta"] = meta
                         st.session_state["final_legal"] = legal
+                        st.session_state["final_models"] = models
                 except Exception as e:
                     st.error(f"시스템 오류 발생: {e}")
 
         st.markdown("---")
         st.info("💡 법령(원문 유지) → 판례검색 → 전략 → 공문(JSON) → 렌더링(태그 제거) → DB 저장")
+
+        if "final_models" in st.session_state:
+            st.markdown("### 🤖 사용된 LLM 모델")
+            for step, model in st.session_state["final_models"].items():
+                st.markdown(f"- **{step}**: `{model}`")
 
     with col_right:
         if "final_doc" in st.session_state:
@@ -484,11 +497,9 @@ def main():
             meta = st.session_state["final_meta"]
             legal_basis = st.session_state.get("final_legal", "")
 
-            # 법령 원문은 별도 영역에 그대로 표시(요구사항)
             st.subheader("📜 적용 법령(원문)")
             st.info(legal_basis)
 
-            # 렌더링은 iframe 격리 + 모든 값 sanitize/escape
             html_content = f"""
 <!doctype html>
 <html>
@@ -537,7 +548,7 @@ def main():
 </body>
 </html>
 """
-            # ✅ 여기서 iframe 렌더링 (Streamlit DOM 충돌 방지)
+            # ✅ iframe 렌더링
             components.html(html_content, height=1100, scrolling=True)
 
             st.download_button(
