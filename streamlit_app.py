@@ -7,6 +7,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta
+from html import escape
 
 # ==========================================
 # 1. Configuration & Styles (설정 및 디자인)
@@ -190,7 +191,7 @@ class DatabaseService:
                 "final_doc": json.dumps(doc_data, ensure_ascii=False),
                 "created_at": datetime.now().isoformat()
             }
-            # 'law_logs' 테이블에 저장 (테이블이 존재해야 함)
+            # 'law_logs' 테이블에 저장 (테이블이 존재해야 )
             self.client.table("law_logs").insert(data).execute()
             return "DB 저장 성공"
         except Exception as e:
@@ -282,7 +283,7 @@ class LegalAgents:
         }
         
         prompt = f"""
-        당신은 행정기관의 베테랑 서기입니다. 아래 정보를 바탕으로 완결된 공문서를 작성하세요.
+        당신은 행정기관의 베테랑 서기입니다. 아래 정보를 바탕으로 완결 공문서를 작성하세요.
         
         [입력 정보]
         - 민원 상황: {situation}
@@ -371,6 +372,11 @@ def run_workflow(user_input):
 def main():
     col_left, col_right = st.columns([1, 1.2])
 
+    def _safe_html_text(value):
+        if value is None:
+            return ""
+        return escape(str(value), quote=False).replace("\n", "<br>")
+
     with col_left:
         st.title("🏢 AI 행정관 Pro")
         st.caption("Gemini 2.5 + Search + Strategy + DB")
@@ -405,11 +411,11 @@ def main():
                 html_content = f"""
                 <div class="paper-sheet">
                     <div class="stamp">직인생략</div>
-                    <div class="doc-header">{doc.get('title', '공 문 서')}</div>
+                    <div class="doc-header">{_safe_html_text(doc.get('title', '공 문 서'))}</div>
                     <div class="doc-info">
-                        <span>문서번호: {meta['doc_num']}</span>
-                        <span>시행일자: {meta['today_str']}</span>
-                        <span>수신: {doc.get('receiver', '수신자 참조')}</span>
+                        <span>문서번호: {_safe_html_text(meta.get('doc_num'))}</span>
+                        <span>시행일자: {_safe_html_text(meta.get('today_str'))}</span>
+                        <span>수신: {_safe_html_text(doc.get('receiver', '수신자 참조'))}</span>
                     </div>
                     <hr style="border: 1px solid black; margin-bottom: 30px;">
                     <div class="doc-body">
@@ -417,10 +423,10 @@ def main():
                 paragraphs = doc.get('body_paragraphs', [])
                 if isinstance(paragraphs, str): paragraphs = [paragraphs]
                 for p in paragraphs:
-                    html_content += f"<p style='margin-bottom: 15px;'>{p}</p>"
+                    html_content += f"<p style='margin-bottom: 15px;'>{_safe_html_text(p)}</p>"
                 html_content += f"""
                     </div>
-                    <div class="doc-footer">{doc.get('department_head', '행정기관장')}</div>
+                    <div class="doc-footer">{_safe_html_text(doc.get('department_head', '행정기관장'))}</div>
                 </div>
                 """
                 st.markdown(html_content, unsafe_allow_html=True)
