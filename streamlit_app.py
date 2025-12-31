@@ -1316,7 +1316,7 @@ def main():
                 """,
                 unsafe_allow_html=True,
             )
-        else:
+        else: # <--- 여기서부터 들여쓰기가 중요합니다.
             # 데이터 추출
             doc = ensure_doc_shape(final["doc"])
             meta = final["meta"]
