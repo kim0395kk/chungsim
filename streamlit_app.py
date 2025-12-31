@@ -143,7 +143,7 @@ MODEL_PRICES_PER_1M = {
 def estimate_tokens(text: str) -> int:
     if not text:
         return 0
-    return max(1, int(len(text) / 3.5))
+    return max(1, int(len(text) / 3.5))7
 
 def metrics_init():
     if "metrics" not in st.session_state:
@@ -1319,7 +1319,7 @@ def main():
                 """,
                 unsafe_allow_html=True,
             )
-        else:
+else:
             # 데이터 추출
             doc = ensure_doc_shape(final["doc"])
             meta = final["meta"]
@@ -1458,6 +1458,3 @@ def main():
                             st.caption(f"    └ 가장 유사한 법령: {t.get('top')}")
                 
                 st.info(f"현재 사용 중인 API Key(OC) 존재 여부: {'예' if law_api.oc else '아니오'}")
-
-if __name__ == "__main__":
-    main()
