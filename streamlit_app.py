@@ -1444,8 +1444,11 @@ def main():
             strategy = final.get("strategy", "")
             task_type = final.get("task_type", "(미분류)")
 
-            tab1, tab2, tab3 = st.tabs(["📄 공문서 프리뷰", "🔍 법리/증거 분석", "🧩 조문 후보/디버그"])
+                        tab1, tab2, tab3 = st.tabs(["📄 공문서 프리뷰", "🔍 법리/증거 분석", "🧩 조문 후보/디버그"])
 
+            # -------------------------
+            # TAB 1
+            # -------------------------
             with tab1:
                 html_content = f"""
 <!doctype html>
@@ -1486,6 +1489,7 @@ def main():
 """
                 for p in doc.get("body_paragraphs", []):
                     html_content += f"<p>{safe_html(p)}</p>\n"
+
                 html_content += f"""
     </div>
     <div class="doc-footer">{safe_html(doc.get("department_head"))}</div>
@@ -1494,6 +1498,7 @@ def main():
 </html>
 """
                 components.html(html_content, height=1100, scrolling=True)
+
                 st.download_button(
                     label="🖨️ 다운로드 (HTML)",
                     data=html_content,
@@ -1502,23 +1507,34 @@ def main():
                     use_container_width=True,
                 )
 
+            # -------------------------
+            # TAB 2
+            # -------------------------
             with tab2:
                 st.subheader("⚖️ 법적 근거 및 처리 전략")
                 st.info(f"법령 상태: {legal_status} / 소스: {law_debug.get('source')}")
+
                 st.text_area("법령 원문", value=legal_basis, height=200, disabled=True)
                 st.markdown(strategy)
 
                 st.markdown("---")
                 st.subheader("🧾 네이버 검색 근거 (클릭 시 원문 이동)")
 
-                evidence_items = (final.get("provenance", {}) or {}).get("evidence_items", [])
+                provenance = final.get("provenance", {}) if isinstance(final.get("provenance", {}), dict) else {}
+                evidence_items = provenance.get("evidence_items", [])
 
                 if not evidence_items:
                     st.info("수집된 네이버 검색 근거가 없습니다.")
                 else:
                     for it in evidence_items:
                         lvl = it.get("quality_level", "LOW")
-                        color = "#1e40af" if lvl == "HIGH" else "#c2410c" if lvl == "MED" else "#6b7280"
+                        if lvl == "HIGH":
+                            color = "#1e40af"
+                        elif lvl == "MED":
+                            color = "#c2410c"
+                        else:
+                            color = "#6b7280"
+
                         st.markdown(
                             f"""
 <div style="border-left: 5px solid {color}; padding: 10px 15px; margin-bottom: 15px; background-color: white; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
@@ -1539,20 +1555,31 @@ def main():
                             unsafe_allow_html=True,
                         )
 
+            # -------------------------
+            # TAB 3
+            # -------------------------
             with tab3:
                 st.subheader("🧩 조문 후보(자동탐색) → 사람 선택으로 CONFIRMED 격상")
-                auto_cands = law_debug.get("auto_candidates", []) if isinstance(law_debug.get("auto_candidates", []), list) else []
+
+                auto_cands = law_debug.get("auto_candidates", [])
+                if not isinstance(auto_cands, list):
+                    auto_cands = []
+
                 if not auto_cands:
                     st.info("자동탐색 후보가 없습니다. (이미 CONFIRMED이거나, 키워드 매칭 실패)")
                 else:
-                    options = [
-                        f"{i+1}) {c.get('article_no','')} | 점수:{c.get('score','')} | {c.get('title','')}"
-                        for i, c in enumerate(auto_cands)
-                    ]
+                    options = []
+                    for i, c in enumerate(auto_cands):
+                        options.append(
+                            f"{i+1}) {c.get('article_no','')} | 점수:{c.get('score','')} | {c.get('title','')}"
+                        )
+
                     sel = st.selectbox("조문 후보 선택", options=options, index=0)
+
                     if st.button("✅ 선택한 조문으로 확정(CONFIRMED) 후 재작성", use_container_width=True):
                         idx = max(0, options.index(sel))
                         picked = auto_cands[idx]
+
                         st.session_state["override_legal"] = {
                             "status": "CONFIRMED",
                             "basis": f"[{law_debug.get('law_name','')} {picked.get('article_no','')}]\n\n{picked.get('fulltext','')}",
@@ -1564,13 +1591,15 @@ def main():
 
                 st.markdown("---")
                 st.subheader("🔧 LAW API 디버깅 정보")
+
                 traces = law_debug.get("traces", [])
-                if not traces:
+                if not isinstance(traces, list) or not traces:
                     st.warning("API 호출 시도 기록이 없습니다. API ID(OC) 설정을 확인하세요.")
                 else:
                     for t in traces:
-                        status_icon = "✅" if t.get("count", 0) > 0 else "❌"
-                        st.write(f"{status_icon} **쿼리**: `{t.get('query')}` → **검색결과**: {t.get('count')}건")
+                        cnt = int(t.get("count", 0) or 0)
+                        status_icon = "✅" if cnt > 0 else "❌"
+                        st.write(f"{status_icon} **쿼리**: `{t.get('query')}` → **검색결과**: {cnt}건")
                         if t.get("top"):
                             st.caption(f"    └ 가장 유사한 법령: {t.get('top')}")
 
