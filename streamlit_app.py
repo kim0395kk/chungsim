@@ -1312,153 +1312,152 @@ def main():
         if not final:
             st.markdown(
                 """
-<div style='text-align: center; padding: 100px; color: #aaa; background: white; border-radius: 10px; border: 2px dashed #ddd;'>
-  <h3>📄 Document Preview</h3>
-  <p>왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.</p>
-</div>
-""",
+                <div style='text-align: center; padding: 100px; color: #aaa; background: white; border-radius: 10px; border: 2px dashed #ddd;'>
+                  <h3>📄 Document Preview</h3>
+                  <p>왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.</p>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
-            return
+        else:
+            # 데이터 추출
+            doc = ensure_doc_shape(final["doc"])
+            meta = final["meta"]
+            legal_basis = final["legal_basis"]
+            legal_status = final["legal_status"]
+            law_debug = final.get("law_debug", {})
+            strategy = final.get("strategy", "")
+            evidence_text = final.get("evidence_text", "")
+            evsum = final.get("evidence_summary", {})
+            task_type = final.get("task_type", "(미분류)")
 
-        doc = ensure_doc_shape(final["doc"])
-        meta = final["meta"]
-        legal_basis = final["legal_basis"]
-        legal_status = final["legal_status"]
-        law_debug = final.get("law_debug", {})
-        strategy = final.get("strategy", "")
-        evidence_text = final.get("evidence_text", "")
-        evsum = final.get("evidence_summary", {})
-        task_type = final.get("task_type", "(미분류)")
+            # 탭 생성
+            tab1, tab2, tab3 = st.tabs(["📄 공문서 프리뷰", "🔍 법리/증거 분석", "🧩 조문 후보/디버그"])
 
-        tab1, tab2, tab3 = st.tabs(["📄 공문서 프리뷰", "🔍 법리/증거 분석", "🧩 조문 후보/디버그"])
-
-        with tab1:
-            html_content = f"""
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  body {{ margin:0; padding:0; background:#f3f4f6; }}
-  .paper-sheet {{
-    background:#fff; max-width:210mm; min-height:297mm; padding:25mm; margin:0 auto;
-    font-family: 'Noto Serif KR','Noto Sans KR','Nanum Gothic','Apple SD Gothic Neo','Malgun Gothic',serif;
-    color:#111; line-height:1.7; position:relative;
-  }}
-  .doc-header {{ text-align:center; font-size:22pt; font-weight:900; margin-bottom:30px; letter-spacing:2px; }}
-  .doc-info {{
-    display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
-    font-size:11pt; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:20px;
-  }}
-  .doc-body {{ font-size:12pt; }}
-  .doc-footer {{ text-align:center; font-size:20pt; font-weight:bold; margin-top:80px; letter-spacing:5px; }}
-  .stamp {{
-    position:absolute; bottom:85px; right:80px; border:3px solid #c00; color:#c00;
-    padding:5px 10px; font-size:14pt; font-weight:bold; transform:rotate(-15deg); opacity:0.85; border-radius:5px;
-  }}
-  p {{ margin: 0 0 15px 0; }}
-</style>
-</head>
-<body>
-  <div class="paper-sheet">
-    <div class="stamp">직인생략</div>
-    <div class="doc-header">{safe_html(doc.get("title"))}</div>
-    <div class="doc-info">
-      <span>문서번호: {safe_html(meta.get("doc_num"))}</span>
-      <span>시행일자: {safe_html(meta.get("today_str"))}</span>
-      <span>수신: {safe_html(doc.get("receiver"))}</span>
-    </div>
-    <div class="doc-body">
-"""
-            for p in doc.get("body_paragraphs", []):
-                html_content += f"<p>{safe_html(p)}</p>\n"
-            html_content += f"""
-    </div>
-    <div class="doc-footer">{safe_html(doc.get("department_head"))}</div>
-  </div>
-</body>
-</html>
-"""
-            components.html(html_content, height=1100, scrolling=True)
-            st.download_button(
-                label="🖨️ 다운로드 (HTML)",
-                data=html_content,
-                file_name="공문서.html",
-                mime="text/html",
-                use_container_width=True,
-            )
-
-with tab2:
-            st.subheader("⚖️ 법적 근거 및 처리 전략")
-            st.info(f"법령 상태: {legal_status} / 소스: {law_debug.get('source')}")
-            st.text_area("법령 원문", value=legal_basis, height=200, disabled=True)
-            st.markdown(strategy)
-
-            st.markdown("---")
-            st.subheader("🧾 네이버 검색 근거 (클릭 시 원문 이동)")
-            
-            # workflow에서 저장한 evidence_items 리스트를 가져옵니다.
-            evidence_items = final.get("provenance", {}).get("evidence_items", [])
-            
-            if not evidence_items:
-                st.info("수집된 네이버 검색 근거가 없습니다.")
-            else:
-                for it in evidence_items:
-                    lvl = it.get("quality_level", "LOW")
-                    color = "#1e40af" if lvl == "HIGH" else "#c2410c" if lvl == "MED" else "#6b7280"
-                    
-                    # HTML을 사용한 클릭 가능한 카드형 UI
-                    st.markdown(f"""
-                    <div style="border-left: 5px solid {color}; padding: 10px 15px; margin-bottom: 15px; background-color: white; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <div style="font-size: 0.8rem; color: {color}; font-weight: bold; margin-bottom: 5px;">
-                            [{lvl} / {it.get('quality_score')}] {it.get('source')}
-                        </div>
-                        <a href="{it.get('link')}" target="_blank" style="text-decoration: none; color: #1e3a8a; font-size: 1.1rem; font-weight: bold;">
-                            {it.get('title')} <span style="font-size: 0.9rem;">🔗</span>
-                        </a>
-                        <div style="font-size: 0.95rem; color: #374151; margin-top: 5px; line-height: 1.5;">
-                            {it.get('description')}
-                        </div>
-                        <div style="font-size: 0.8rem; color: #9ca3af; margin-top: 8px;">
-                            {it.get('pubDate')}
-                        </div>
+            with tab1:
+                html_content = f"""
+                <!doctype html>
+                <html>
+                <head>
+                <meta charset="utf-8">
+                <style>
+                  body {{ margin:0; padding:0; background:#f3f4f6; }}
+                  .paper-sheet {{
+                    background:#fff; max-width:210mm; min-height:297mm; padding:25mm; margin:0 auto;
+                    font-family: 'Noto Serif KR','Noto Sans KR','Nanum Gothic','Apple SD Gothic Neo','Malgun Gothic',serif;
+                    color:#111; line-height:1.7; position:relative;
+                  }}
+                  .doc-header {{ text-align:center; font-size:22pt; font-weight:900; margin-bottom:30px; letter-spacing:2px; }}
+                  .doc-info {{
+                    display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+                    font-size:11pt; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:20px;
+                  }}
+                  .doc-body {{ font-size:12pt; }}
+                  .doc-footer {{ text-align:center; font-size:20pt; font-weight:bold; margin-top:80px; letter-spacing:5px; }}
+                  .stamp {{
+                    position:absolute; bottom:85px; right:80px; border:3px solid #c00; color:#c00;
+                    padding:5px 10px; font-size:14pt; font-weight:bold; transform:rotate(-15deg); opacity:0.85; border-radius:5px;
+                  }}
+                  p {{ margin: 0 0 15px 0; }}
+                </style>
+                </head>
+                <body>
+                  <div class="paper-sheet">
+                    <div class="stamp">직인생략</div>
+                    <div class="doc-header">{safe_html(doc.get("title"))}</div>
+                    <div class="doc-info">
+                      <span>문서번호: {safe_html(meta.get("doc_num"))}</span>
+                      <span>시행일자: {safe_html(meta.get("today_str"))}</span>
+                      <span>수신: {safe_html(doc.get("receiver"))}</span>
                     </div>
-                    """, unsafe_allow_html=True)            # --- 교체 끝 ---
+                    <div class="doc-body">
+                """
+                for p in doc.get("body_paragraphs", []):
+                    html_content += f"<p>{safe_html(p)}</p>\n"
+                html_content += f"""
+                    </div>
+                    <div class="doc-footer">{safe_html(doc.get("department_head"))}</div>
+                  </div>
+                </body>
+                </html>
+                """
+                components.html(html_content, height=1100, scrolling=True)
+                st.download_button(
+                    label="🖨️ 다운로드 (HTML)",
+                    data=html_content,
+                    file_name="공문서.html",
+                    mime="text/html",
+                    use_container_width=True,
+                )
 
-        with tab3:
-            st.subheader("🧩 조문 후보(자동탐색) → 사람 선택으로 CONFIRMED 격상")
-            auto_cands = law_debug.get("auto_candidates", []) if isinstance(law_debug.get("auto_candidates", []), list) else []
-            if not auto_cands:
-                st.info("자동탐색 후보가 없습니다. (이미 CONFIRMED이거나, 키워드 매칭 실패)")
-            else:
-                options = [f"{i+1}) {c.get('article_no','')} | 점수:{c.get('score','')} | {c.get('title','')}" for i, c in enumerate(auto_cands)]
-                sel = st.selectbox("조문 후보 선택", options=options, index=0)
-                if st.button("✅ 선택한 조문으로 확정(CONFIRMED) 후 재작성", use_container_width=True):
-                    idx = max(0, options.index(sel))
-                    picked = auto_cands[idx]
-                    st.session_state["override_legal"] = {
-                        "status": "CONFIRMED",
-                        "basis": f"[{law_debug.get('law_name','')} {picked.get('article_no','')}]\n\n{picked.get('fulltext','')}",
-                        "picked": picked,
-                        "law_name": law_debug.get("law_name",""),
-                        "law_id": law_debug.get("law_id",""),
-                    }
-                    st.rerun()
+            with tab2:
+                st.subheader("⚖️ 법적 근거 및 처리 전략")
+                st.info(f"법령 상태: {legal_status} / 소스: {law_debug.get('source')}")
+                st.text_area("법령 원문", value=legal_basis, height=200, disabled=True)
+                st.markdown(strategy)
 
-            st.markdown("---")
-            st.subheader("🔧 LAW API 디버깅 정보")
-            traces = law_debug.get("traces", [])
-            if not traces:
-                st.warning("API 호출 시도 기록이 없습니다. API ID(OC) 설정을 확인하세요.")
-            else:
-                for t in traces:
-                    status_icon = "✅" if t.get('count', 0) > 0 else "❌"
-                    st.write(f"{status_icon} **쿼리**: `{t.get('query')}` → **검색결과**: {t.get('count')}건")
-                    if t.get('top'):
-                        st.caption(f"   └ 가장 유사한 법령: {t.get('top')}")
-            
-            st.info(f"현재 사용 중인 API Key(OC) 존재 여부: {'예' if law_api.oc else '아니오'}")
+                st.markdown("---")
+                st.subheader("🧾 네이버 검색 근거 (클릭 시 원문 이동)")
+                
+                evidence_items = final.get("provenance", {}).get("evidence_items", [])
+                
+                if not evidence_items:
+                    st.info("수집된 네이버 검색 근거가 없습니다.")
+                else:
+                    for it in evidence_items:
+                        lvl = it.get("quality_level", "LOW")
+                        color = "#1e40af" if lvl == "HIGH" else "#c2410c" if lvl == "MED" else "#6b7280"
+                        
+                        st.markdown(f"""
+                        <div style="border-left: 5px solid {color}; padding: 10px 15px; margin-bottom: 15px; background-color: white; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <div style="font-size: 0.8rem; color: {color}; font-weight: bold; margin-bottom: 5px;">
+                                [{lvl} / {it.get('quality_score')}] {it.get('source')}
+                            </div>
+                            <a href="{it.get('link')}" target="_blank" style="text-decoration: none; color: #1e3a8a; font-size: 1.1rem; font-weight: bold;">
+                                {it.get('title')} <span style="font-size: 0.9rem;">🔗</span>
+                            </a>
+                            <div style="font-size: 0.95rem; color: #374151; margin-top: 5px; line-height: 1.5;">
+                                {it.get('description')}
+                            </div>
+                            <div style="font-size: 0.8rem; color: #9ca3af; margin-top: 8px;">
+                                {it.get('pubDate')}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+            with tab3:
+                st.subheader("🧩 조문 후보(자동탐색) → 사람 선택으로 CONFIRMED 격상")
+                auto_cands = law_debug.get("auto_candidates", []) if isinstance(law_debug.get("auto_candidates", []), list) else []
+                if not auto_cands:
+                    st.info("자동탐색 후보가 없습니다. (이미 CONFIRMED이거나, 키워드 매칭 실패)")
+                else:
+                    options = [f"{i+1}) {c.get('article_no','')} | 점수:{c.get('score','')} | {c.get('title','')}" for i, c in enumerate(auto_cands)]
+                    sel = st.selectbox("조문 후보 선택", options=options, index=0)
+                    if st.button("✅ 선택한 조문으로 확정(CONFIRMED) 후 재작성", use_container_width=True):
+                        idx = max(0, options.index(sel))
+                        picked = auto_cands[idx]
+                        st.session_state["override_legal"] = {
+                            "status": "CONFIRMED",
+                            "basis": f"[{law_debug.get('law_name','')} {picked.get('article_no','')}]\n\n{picked.get('fulltext','')}",
+                            "picked": picked,
+                            "law_name": law_debug.get("law_name",""),
+                            "law_id": law_debug.get("law_id",""),
+                        }
+                        st.rerun()
+
+                st.markdown("---")
+                st.subheader("🔧 LAW API 디버깅 정보")
+                traces = law_debug.get("traces", [])
+                if not traces:
+                    st.warning("API 호출 시도 기록이 없습니다. API ID(OC) 설정을 확인하세요.")
+                else:
+                    for t in traces:
+                        status_icon = "✅" if t.get('count', 0) > 0 else "❌"
+                        st.write(f"{status_icon} **쿼리**: `{t.get('query')}` → **검색결과**: {t.get('count')}건")
+                        if t.get('top'):
+                            st.caption(f"    └ 가장 유사한 법령: {t.get('top')}")
+                
+                st.info(f"현재 사용 중인 API Key(OC) 존재 여부: {'예' if law_api.oc else '아니오'}")
 
 if __name__ == "__main__":
     main()
