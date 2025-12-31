@@ -32,7 +32,7 @@ except Exception:
 # =========================
 # 1) Page & Style
 # =========================
-st.set_page_config(layout="wide", page_title="AI Bureau: Legal Glass (Stable)", page_icon="⚖️")
+st.set_page_config(layout="wide", page_title="AI Bureau: Legal Glass (Ops-Final)", page_icon="⚖️")
 
 st.markdown(
     """
@@ -129,7 +129,7 @@ def ensure_doc_shape(doc):
 # 2) Metrics (모델/비용/시간)
 # =========================
 MODEL_PRICES_PER_1M = {
-    # 여기에 실제 단가(USD/1M tokens)로 바꿔 넣으면 됨
+    # 실제 단가(USD/1M tokens)로 바꾸면 됨
     "Gemini / gemini-2.5-flash": 0.0,
     "Gemini / gemini-2.5-flash-lite": 0.0,
     "Gemini / gemini-2.0-flash": 0.0,
@@ -140,7 +140,6 @@ MODEL_PRICES_PER_1M = {
 def estimate_tokens(text: str) -> int:
     if not text:
         return 0
-    # 보수적 근사(한/영 혼합): 문자수/3.5
     return max(1, int(len(text) / 3.5))
 
 def metrics_init():
@@ -232,7 +231,58 @@ llm_service = LLMService()
 
 
 # =========================
-# 4) LAW API Service (방어형)
+# helpers (정규화 + 항 번호 표기)
+# =========================
+def norm_space(s: str) -> str:
+    return re.sub(r"\s+", " ", clean_text(s or "")).strip()
+
+def only_digits(s: str) -> str:
+    return re.sub(r"[^0-9]", "", clean_text(s or ""))
+
+_CIRCLED = {
+    1:"①", 2:"②", 3:"③", 4:"④", 5:"⑤", 6:"⑥", 7:"⑦", 8:"⑧", 9:"⑨", 10:"⑩",
+    11:"⑪", 12:"⑫", 13:"⑬", 14:"⑭", 15:"⑮", 16:"⑯", 17:"⑰", 18:"⑱", 19:"⑲", 20:"⑳"
+}
+
+def to_circled(n: str) -> str:
+    try:
+        i = int(re.sub(r"[^0-9]", "", n or ""))
+        return _CIRCLED.get(i, f"({i})")
+    except Exception:
+        return ""
+
+def make_law_query_candidates(hint: dict) -> list:
+    # law_name + keywords 기반으로 재탐색 후보 만들기
+    law_name = norm_space(hint.get("law_name", ""))
+    keywords = hint.get("keywords", []) if isinstance(hint.get("keywords", []), list) else []
+
+    cands = []
+    if law_name:
+        cands += [law_name]
+        cands += [law_name.replace(" ", "")]
+        if not law_name.endswith("법"):
+            cands += [law_name + "법"]
+
+    for kw in keywords[:5]:
+        kw = norm_space(kw)
+        if not kw:
+            continue
+        cands += [kw, kw.replace(" ", "")]
+        if not kw.endswith("법") and len(kw) <= 10:
+            cands += [kw + "법"]
+
+    # 중복 제거(순서 유지)
+    seen = set()
+    out = []
+    for x in cands:
+        if x and x not in seen:
+            out.append(x)
+            seen.add(x)
+    return out[:10]
+
+
+# =========================
+# 4) LAW API Service (운영형 강화)
 # =========================
 class LawAPIService:
     """
@@ -250,6 +300,9 @@ class LawAPIService:
         except Exception:
             self.enabled = False
 
+        # 간단 캐시(같은 법령 반복 호출 방지)
+        self._law_xml_cache = {}
+
     def _call_xml(self, params: dict) -> dict:
         if not self.enabled:
             return {}
@@ -257,43 +310,129 @@ class LawAPIService:
         r.raise_for_status()
         return xmltodict.parse(r.text)
 
-    def search_law_id(self, law_name: str) -> dict:
-        if not self.enabled or not law_name:
-            return {}
+    def search_law_candidates(self, query: str, display: int = 20) -> list:
+        if not self.enabled or not query:
+            return []
         params = {
             "OC": self.oc,
             "target": "law",
             "type": "XML",
-            "query": law_name,
-            "display": 1,
+            "query": query,
+            "display": max(1, min(display, 50)),
         }
         data = self._call_xml(params)
         try:
             law = data.get("LawSearch", {}).get("law")
-            if isinstance(law, list):
-                law = law[0]
-            return {"law_id": law.get("lawId", ""), "law_name": law.get("lawNm", "")}
+            if not law:
+                return []
+            if isinstance(law, dict):
+                law = [law]
+            out = []
+            for item in law:
+                if not isinstance(item, dict):
+                    continue
+                out.append({
+                    "law_id": item.get("lawId", ""),
+                    "law_name": item.get("lawNm", ""),
+                    "law_type": item.get("lawType", ""),
+                })
+            return out
         except Exception:
+            return []
+
+    def choose_best_law(self, candidates: list, query: str) -> dict:
+        q = norm_space(query).replace(" ", "")
+        if not candidates:
             return {}
+
+        def score(item):
+            name = norm_space(item.get("law_name", ""))
+            n2 = name.replace(" ", "")
+            s = 0
+            if not name:
+                return -999
+            if q and q in n2:
+                s += 50
+            # 시행령/시행규칙은 본법 대비 살짝 감점(상황 따라 다르니 -2 정도)
+            if "시행령" in name:
+                s -= 2
+            if "시행규칙" in name:
+                s -= 2
+            s -= max(0, len(name) - 12) * 0.2
+            return s
+
+        best = sorted(candidates, key=score, reverse=True)[0]
+        return best if best.get("law_id") else {}
 
     def get_law_xml(self, law_id: str) -> dict:
         if not self.enabled or not law_id:
             return {}
+        if law_id in self._law_xml_cache:
+            return self._law_xml_cache[law_id]
         params = {"OC": self.oc, "target": "law", "type": "XML", "ID": law_id}
-        return self._call_xml(params)
+        data = self._call_xml(params)
+        self._law_xml_cache[law_id] = data
+        return data
+
+    def _as_list(self, x):
+        if x is None:
+            return []
+        if isinstance(x, list):
+            return x
+        return [x]
 
     def extract_article_text(self, law_xml: dict, article_no: str) -> str:
+        """
+        - '제32조', '32조', '제 32 조' 등 입력을 숫자로 정규화
+        - ArticleTitle/조문번호(@조문번호)/content/Paragraph(항번호 포함)까지 합쳐서 반환
+        """
         if not law_xml or not article_no:
             return ""
         try:
+            target_num = only_digits(article_no)  # '제32조' -> '32'
+            if not target_num:
+                return ""
+
             articles = law_xml.get("Law", {}).get("Article", [])
-            if isinstance(articles, dict):
-                articles = [articles]
+            articles = self._as_list(articles)
+
             for art in articles:
-                title = (art.get("ArticleTitle") or art.get("title") or "")
-                content = (art.get("ArticleContent") or art.get("content") or "")
-                if article_no in title:
-                    return clean_text(content)
+                if not isinstance(art, dict):
+                    continue
+
+                curr_art_no = clean_text(art.get("@조문번호", ""))  # 예: 003200 등
+                title = clean_text(art.get("ArticleTitle") or art.get("title") or "")
+                content = clean_text(art.get("ArticleContent") or art.get("content") or "")
+
+                title_hit = (target_num in only_digits(title)) or (target_num in title)
+                no_hit = (target_num in curr_art_no)
+
+                if title_hit or no_hit:
+                    paragraphs = self._as_list(art.get("Paragraph"))
+                    p_texts = []
+                    for p in paragraphs:
+                        if not isinstance(p, dict):
+                            continue
+
+                        # 항 번호 필드명 변형 방어
+                        pno = (
+                            clean_text(p.get("ParagraphNumber", "")) or
+                            clean_text(p.get("@항번호", "")) or
+                            clean_text(p.get("ParagraphNo", "")) or
+                            clean_text(p.get("@번호", ""))
+                        )
+
+                        ptxt = clean_text(p.get("ParagraphContent", "")) or clean_text(p.get("content", ""))
+                        if not ptxt:
+                            continue
+
+                        prefix = (to_circled(pno) + " ") if pno else ""
+                        p_texts.append(f"{prefix}{ptxt}")
+
+                    joined = "\n".join([x for x in [title, content, "\n".join(p_texts)] if x])
+                    joined = clean_text(joined)
+                    if joined:
+                        return joined
         except Exception:
             pass
         return ""
@@ -400,12 +539,12 @@ class LegalAgents:
 상황: "{situation}"
 
 너는 행정 실무자가 쓰는 '법령 검색 힌트'만 만든다.
-절대 확정하지 말고, 아래 JSON만 출력하라.
+절대 확정/단정하지 말고, 아래 JSON만 출력하라.
 
 규칙:
-- law_name: 법령명 1개(추정)
+- law_name: 법령명 1개(추정, 모르면 빈 문자열)
 - article_no: 조문번호(예: 제32조) 모르면 빈 문자열
-- keywords: 검색 키워드 3~7개
+- keywords: 검색 키워드 3~7개(법령명 후보 포함 가능)
 
 {{
   "law_name": "",
@@ -416,24 +555,55 @@ class LegalAgents:
         obj = llm_service.generate_json(prompt)
         if not isinstance(obj, dict):
             return {"law_name": "", "article_no": "", "keywords": []}
+        kws = obj.get("keywords", [])
+        if not isinstance(kws, list):
+            kws = []
+        kws = [norm_space(x) for x in kws if norm_space(x)]
         return {
-            "law_name": clean_text(obj.get("law_name", "")),
-            "article_no": clean_text(obj.get("article_no", "")),
-            "keywords": obj.get("keywords", []) if isinstance(obj.get("keywords", []), list) else [],
+            "law_name": norm_space(obj.get("law_name", "")),
+            "article_no": norm_space(obj.get("article_no", "")),
+            "keywords": kws[:7],
         }
 
     @staticmethod
-    def researcher_original(situation: str) -> str:
+    def fallback_candidates_only(situation: str, hint: dict) -> dict:
+        """
+        ✅ API가 실패했을 때 '원문을 쓰지 말고'
+        - 후보 법령/조문/검색어만 JSON으로 내게 함
+        """
         prompt = f"""
-<role>당신은 30년 경력의 법제관입니다.</role>
+<role>당신은 법령검색 보조자입니다.</role>
 <instruction>
+- 절대 법령 원문을 지어내지 마시오.
+- 확신이 없으면 "알 수 없음" 처리하시오.
+- 목적은 API/검색을 위한 '후보'를 만드는 것입니다.
+
 상황: "{situation}"
-위 상황에 적용할 가장 정확한 '법령명'과 '관련 조항'을 하나만 찾으시오.
-반드시 현행 대한민국 법령이어야 하며, 조항 번호까지 명시하세요.
-(예: 도로교통법 제32조(정차 및 주차의 금지))
+현재 힌트:
+- law_name(추정): "{hint.get('law_name','')}"
+- article_no(추정): "{hint.get('article_no','')}"
+- keywords: {hint.get('keywords', [])}
+
+아래 JSON만 출력:
+{{
+  "law_candidates": ["..."],         // 1~5개 (정식명칭 우선)
+  "article_candidates": ["..."],     // 0~5개 (예: '제32조', '제33조')
+  "search_queries": ["..."]          // 3~7개 (API/웹 검색용 문장)
+}}
 </instruction>
 """
-        return llm_service.generate_text(prompt).strip()
+        obj = llm_service.generate_json(prompt)
+        if not isinstance(obj, dict):
+            return {"law_candidates": [], "article_candidates": [], "search_queries": []}
+
+        def as_list(x):
+            return x if isinstance(x, list) else []
+
+        return {
+            "law_candidates": [norm_space(x) for x in as_list(obj.get("law_candidates")) if norm_space(x)][:5],
+            "article_candidates": [norm_space(x) for x in as_list(obj.get("article_candidates")) if norm_space(x)][:5],
+            "search_queries": [norm_space(x) for x in as_list(obj.get("search_queries")) if norm_space(x)][:7],
+        }
 
     @staticmethod
     def strategist(situation, legal_basis, search_results):
@@ -454,6 +624,10 @@ class LegalAgents:
 
     @staticmethod
     def clerk(situation, legal_basis):
+        """
+        운영 안전:
+        - legal_basis가 비어있거나 PENDING일 때는 모델이 흔들릴 수 있어 기본값 15로 수렴되게 설계.
+        """
         today = datetime.now()
         prompt = f"""
 오늘: {today.strftime('%Y-%m-%d')}
@@ -478,19 +652,25 @@ class LegalAgents:
         }
 
     @staticmethod
-    def drafter(situation, legal_basis, meta_info, strategy):
-        # ✅ f-string JSON 예시 중괄호는 반드시 이스케이프({{ }})
+    def drafter(situation, legal_basis, meta_info, strategy, legal_status="PENDING"):
         prompt = f"""
 당신은 행정기관의 베테랑 서기입니다. 아래 정보를 바탕으로 완결 공문서를 작성하세요.
 
 [입력 정보]
 - 민원 상황: {situation}
 - 법적 근거(원문 유지): {legal_basis}
+- 법적 근거 상태: {legal_status}   # CONFIRMED 또는 PENDING
 - 시행 일자: {meta_info['today_str']}
 - 기한: {meta_info['deadline_str']} ({meta_info['days_added']}일)
 
 [업무 처리 가이드라인 (전략)]
 {strategy}
+
+[필독 지침]
+- 법적 근거 상태가 PENDING 이거나, 법적 근거 문자열에 '⚠️' 또는 '원문을 확정하지 못' 문구가 포함되어 있으면:
+  1) 공문 본문 [근거] 섹션에는 경고문/후보문을 그대로 복사하지 말 것
+  2) 대신 "관련 법령 검토 중" 또는 "OO법 관련 조항 확인 필요"처럼 실무자가 인지할 수 있는 표현으로 작성할 것
+  3) 법령 조문 번호/원문을 단정하여 기재하지 말 것
 
 [중요 금지 규칙]
 - HTML/태그/마크다운/코드블록 절대 사용 금지
@@ -512,7 +692,7 @@ class LegalAgents:
 
 
 # =========================
-# 8) Workflow
+# 8) Workflow (운영용 최종 보정)
 # =========================
 def run_workflow(user_input: str):
     log_placeholder = st.empty()
@@ -524,7 +704,7 @@ def run_workflow(user_input: str):
         style = style if style in ["legal", "search", "strat", "calc", "draft", "sys"] else "sys"
         logs.append(f"<div class='agent-log log-{style}'>{escape(msg)}</div>")
         log_placeholder.markdown("".join(logs), unsafe_allow_html=True)
-        time.sleep(0.12)
+        time.sleep(0.10)
 
     def tick():
         return time.perf_counter()
@@ -539,31 +719,91 @@ def run_workflow(user_input: str):
     add_log(f"🤖 법령 힌트 모델: {llm_service.last_model_used}", "sys")
 
     legal_basis = ""
-    law_debug = {}
+    law_debug = {"source": "NONE"}
 
-    # LAW API로 원문 확정(가능한 경우)
-    if law_api.enabled and hint.get("law_name"):
+    # ✅ LAW API로 원문 확정(강화된 재탐색)
+    if law_api.enabled:
+        add_log("📚 LAW API로 법령/조문 원문 확보 시도...", "legal")
         try:
             t0 = tick()
-            info = law_api.search_law_id(hint["law_name"])
-            law_xml = law_api.get_law_xml(info.get("law_id", "")) if info.get("law_id") else {}
-            article_text = law_api.extract_article_text(law_xml, hint.get("article_no", "")) if hint.get("article_no") else ""
-            timing["LAW API(ms)"] = int((tick() - t0) * 1000)
+            candidates = make_law_query_candidates(hint)
+            article_no = hint.get("article_no", "")
 
-            if info.get("law_name") and hint.get("article_no") and article_text:
-                legal_basis = f"{info['law_name']} {hint['article_no']}\n\n[조문 원문]\n{article_text}"
-                law_debug = {"source": "LAW_API", "law_id": info.get("law_id"), "law_name": info.get("law_name"), "article_no": hint.get("article_no")}
-                add_log("✅ LAW API로 법령 원문 확정 완료", "legal")
+            best_law = {}
+            best_from_query = ""
+
+            for q in candidates:
+                law_cands = law_api.search_law_candidates(q, display=20)
+                chosen = law_api.choose_best_law(law_cands, q)
+                if chosen.get("law_id"):
+                    best_law = chosen
+                    best_from_query = q
+                    break  # 운영: 속도 우선(첫 성공)
+
+            if best_law.get("law_id"):
+                law_xml = law_api.get_law_xml(best_law["law_id"])
+                article_text = law_api.extract_article_text(law_xml, article_no) if article_no else ""
+
+                timing["LAW API(ms)"] = int((tick() - t0) * 1000)
+
+                if article_no and article_text:
+                    legal_basis = f"[{best_law['law_name']} {article_no}]\n\n{article_text}"
+                    law_debug = {
+                        "source": "LAW_API_SUCCESS",
+                        "law_id": best_law.get("law_id"),
+                        "law_name": best_law.get("law_name"),
+                        "article_no": article_no,
+                        "query_used": best_from_query,
+                    }
+                    add_log("✅ LAW API로 법령 원문 확정 완료", "legal")
+                else:
+                    legal_basis = (
+                        f"⚠️ LAW API로 '법령'은 확인했으나, 조문 원문을 확정하지 못했습니다.\n"
+                        f"- 법령명: {best_law.get('law_name','')}\n"
+                        f"- 조문: {article_no or '(미지정)'}\n"
+                        f"- 조치: 조문번호/검색어를 보정하거나, 조문을 지정해 다시 시도 필요\n"
+                    )
+                    law_debug = {
+                        "source": "LAW_API_PARTIAL",
+                        "law_id": best_law.get("law_id"),
+                        "law_name": best_law.get("law_name"),
+                        "article_no": article_no,
+                        "query_used": best_from_query,
+                    }
+                    add_log("⚠️ 법령명은 확인, 조문 원문 추출 실패(부분 성공)", "legal")
+            else:
+                timing["LAW API(ms)"] = int((tick() - t0) * 1000)
+                add_log("❌ LAW API 검색 실패: 법령 후보를 찾지 못함", "legal")
         except Exception as e:
-            law_debug = {"source": "LAW_API_FAIL", "error": str(e)}
+            add_log(f"❌ LAW API 오류: {e}", "legal")
+            law_debug = {"source": "LAW_API_ERROR", "error": str(e)}
+    else:
+        add_log("⚠️ LAW API OFF (requests/xmltodict/secrets 확인)", "legal")
 
-    # 실패 시 LLM 원문(요구사항: 원문 유지)
-    if not legal_basis.strip():
+    # ✅ 완전 실패 시: LLM이 '원문'을 만들지 못하게 차단하고, 후보만 생성
+    if (not legal_basis.strip()) or (law_debug.get("source") in ["NONE", "LAW_API_ERROR"]):
+        add_log("🧯 법령 원문 미확보: LLM은 '후보/검색어'만 제시하도록 전환", "sys")
         t0 = tick()
-        legal_basis = LegalAgents.researcher_original(user_input)
-        timing["법령 원문(LLM)(ms)"] = int((tick() - t0) * 1000)
-        model_usage["법령 원문(LLM)"] = llm_service.last_model_used
-        add_log(f"🤖 법령 원문 모델: {llm_service.last_model_used}", "sys")
+        fb = LegalAgents.fallback_candidates_only(user_input, hint)
+        timing["법령 후보(LLM)(ms)"] = int((tick() - t0) * 1000)
+        model_usage["법령 후보(LLM)"] = llm_service.last_model_used
+
+        legal_basis = (
+            "⚠️ 법령 원문을 API로 확정하지 못했습니다. (환각 방지: 원문 생성 금지)\n\n"
+            f"- 1차 힌트(law_name/article_no): {hint.get('law_name','') or '(없음)'} / {hint.get('article_no','') or '(없음)'}\n"
+            f"- LLM 법령 후보: {', '.join(fb.get('law_candidates', [])) or '(없음)'}\n"
+            f"- LLM 조문 후보: {', '.join(fb.get('article_candidates', [])) or '(없음)'}\n"
+            "----------------------------------------\n"
+            "재검색 쿼리(복붙용):\n"
+            + "\n".join([f"- {q}" for q in fb.get("search_queries", [])]) +
+            "\n----------------------------------------\n"
+            "※ 위 내용은 '검색 후보'이며, 원문 근거는 반드시 API/공식출처로 확인 필요"
+        )
+        law_debug = {"source": "LLM_CANDIDATES_ONLY"}
+
+    # ✅ 법적근거 상태 플래그(공문에 경고문 그대로 박히는 사고 방지용)
+    legal_basis_is_confirmed = (law_debug.get("source") == "LAW_API_SUCCESS") and ("⚠️" not in (legal_basis or ""))
+    legal_status_msg = "CONFIRMED" if legal_basis_is_confirmed else "PENDING"
 
     # Search
     add_log("🌍 유사 사례(SerpApi) 검색 중...", "search")
@@ -574,9 +814,8 @@ def run_workflow(user_input: str):
     with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            st.info(f"**적용 법령(원문 유지)**\n\n{legal_basis}")
-            if law_debug:
-                st.caption(f"법령 소스: {law_debug.get('source')}")
+            st.info(f"**적용 법령(원문 유지/후보는 경고 표시)**\n\n{legal_basis}")
+            st.caption(f"법령 소스: {law_debug.get('source')} / 상태: {legal_status_msg}")
         with c2:
             st.warning(f"**유사 사례 검색 결과**\n\n{search_results}")
 
@@ -593,12 +832,14 @@ def run_workflow(user_input: str):
 
     # Deadline + Draft
     add_log("📅 Phase 3: 기한 산정 및 공문(JSON) 작성 중...", "calc")
-    meta_info = LegalAgents.clerk(user_input, legal_basis)
+
+    # ✅ 운영 안전: 법적근거가 미확정이면 clerk가 법령에 끌려가지 않게 비워서 기본값(15일)에 수렴
+    meta_info = LegalAgents.clerk(user_input, legal_basis if legal_basis_is_confirmed else "")
     add_log(f"⏳ 기한 설정: {meta_info['days_added']}일 후 ({meta_info['deadline_str']})", "calc")
 
     add_log("✍️ 공문(JSON) 생성 중...", "draft")
     t0 = tick()
-    doc_data = LegalAgents.drafter(user_input, legal_basis, meta_info, strategy)
+    doc_data = LegalAgents.drafter(user_input, legal_basis, meta_info, strategy, legal_status_msg)
     timing["공문 작성(ms)"] = int((tick() - t0) * 1000)
     model_usage["공문 작성"] = llm_service.last_model_used
     add_log(f"🤖 공문 모델: {llm_service.last_model_used}", "sys")
@@ -612,7 +853,7 @@ def run_workflow(user_input: str):
     timing["DB 저장(ms)"] = int((tick() - t0) * 1000)
 
     add_log(f"✅ 완료 ({save_result})", "sys")
-    time.sleep(0.2)
+    time.sleep(0.15)
     log_placeholder.empty()
 
     # Metrics 누적 (run)
@@ -663,8 +904,8 @@ def main():
     col_left, col_right = st.columns([1, 1.2])
 
     with col_left:
-        st.title("⚖️ AI 행정관 Pro (Stable)")
-        st.caption("LAW API + LLM + SerpApi(requests) + DB + Metrics")
+        st.title("⚖️ AI 행정관 Pro (Ops-Final)")
+        st.caption("LAW API + LLM + SerpApi(requests) + DB + Metrics (Hallucination-Guard + Pending-Aware)")
         st.markdown("---")
 
         user_input = st.text_area(
@@ -705,7 +946,6 @@ def main():
         st.markdown("---")
         render_dashboard()
 
-        # 단계별 모델 표시
         if "final_models" in st.session_state:
             st.markdown("### 🤖 이번 실행에 사용된 LLM 모델(단계별)")
             for step, model in st.session_state["final_models"].items():
@@ -722,7 +962,7 @@ def main():
             meta = st.session_state["final_meta"]
             legal_basis = st.session_state["final_legal"]
 
-            st.subheader("📜 적용 법령(원문 유지)")
+            st.subheader("📜 적용 법령(원문 유지/후보는 경고)")
             st.info(legal_basis)
 
             html_content = f"""
