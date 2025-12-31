@@ -321,30 +321,47 @@ class LawAPIService:
             return x
         return [x]
 
-    def search_law_candidates(self, query: str, display: int = 20) -> list:
+def search_law_candidates(self, query: str, display: int = 20) -> list:
         if not self.enabled or not query:
             return []
+        
+        # 검색어 정제: 특수문자 제거 및 앞뒤 공백 제거
+        clean_query = re.sub(r"[^가-힣a-zA-Z0-9 ]", "", query).strip()
+        
         data = self._call_xml({
-            "OC": self.oc, "target": "law", "type": "XML",
-            "query": query, "display": max(1, min(display, 50)),
+            "OC": self.oc, 
+            "target": "law", 
+            "type": "XML",
+            "query": clean_query, 
+            "display": max(1, min(display, 50)),
         })
+        
         try:
-            law = data.get("LawSearch", {}).get("law")
+            # API 응답 구조 디버깅을 위해 로그 출력 (로컬 터미널 확인용)
+            # print(f"DEBUG: LAW API Query: {clean_query}")
+            
+            search_res = data.get("LawSearch", {})
+            law = search_res.get("law")
+            
             if not law:
+                # 결과가 없을 경우 '전체 건수' 확인
+                total = search_res.get("totalCount", "0")
                 return []
+            
             if isinstance(law, dict):
                 law = [law]
+            
             out = []
             for item in law:
-                if not isinstance(item, dict):
-                    continue
+                if not isinstance(item, dict): continue
                 out.append({
                     "law_id": item.get("lawId", ""),
                     "law_name": item.get("lawNm", ""),
                     "law_type": item.get("lawType", ""),
                 })
             return out
-        except Exception:
+        except Exception as e:
+            # st.error(f"API 파싱 오류: {e}")
             return []
 
     def choose_best_law(self, candidates: list, query: str) -> dict:
@@ -799,14 +816,12 @@ class TGD_Agents:
     def planner(user_input: str) -> dict:
         prompt = f"""
 상황: "{user_input}"
+너는 행정업무 '플래너'다.
 
-너는 행정업무 보조 '플래너'다.
-절대 법령 원문을 만들지 말고, "검색/확정"을 위한 구조만 JSON으로 출력한다.
-
-반드시 포함:
-- task_type: (예: 사전통지/처분예고/회신/안내/과태료/행정처분/행정지도/자료요청 등)
-- law_hint: {{ law_name, article_no, keywords }}
-- naver_queries: {{ news:[], blog:[], kin:[] }}  (각 1~3개)
+[중요 규칙]
+- law_name: 법령의 '공식 명칭'만 적어라 (예: '도로교통법', '자동차관리법'). 조문번호는 넣지 마.
+- article_no: '제OO조' 또는 'OO' 숫자만 적어라.
+- keywords: 법령 검색에 도움이 될 핵심 단어 3~5개.
 
 JSON ONLY:
 {{
@@ -814,7 +829,6 @@ JSON ONLY:
   "law_hint": {{"law_name":"", "article_no":"", "keywords":[]}},
   "naver_queries": {{"news":[], "blog":[], "kin":[]}}
 }}
-"""
         obj = llm_service.generate_json(prompt)
         if not isinstance(obj, dict):
             return {"task_type": "", "law_hint": {"law_name":"", "article_no":"", "keywords":[]}, "naver_queries": {"news":[], "blog":[], "kin":[]}}
@@ -1506,13 +1520,18 @@ with tab2:
                     st.rerun()
 
             st.markdown("---")
-            st.subheader("🔧 LAW Debug(traces)")
+            st.subheader("🔧 LAW API 디버깅 정보")
             traces = law_debug.get("traces", [])
-            if traces:
-                st.text_area("검색 쿼리 트레이스", value="\n".join([f"- {t.get('query')} (count={t.get('count')}) top={t.get('top')}" for t in traces]), height=220, disabled=True)
+            if not traces:
+                st.warning("API 호출 시도 기록이 없습니다. API ID(OC) 설정을 확인하세요.")
             else:
-                st.info("트레이스 데이터가 없습니다.")
-
+                for t in traces:
+                    status_icon = "✅" if t.get('count', 0) > 0 else "❌"
+                    st.write(f"{status_icon} **쿼리**: `{t.get('query')}` → **검색결과**: {t.get('count')}건")
+                    if t.get('top'):
+                        st.caption(f"   └ 가장 유사한 법령: {t.get('top')}")
+            
+            st.info(f"현재 사용 중인 API Key(OC) 존재 여부: {'예' if law_api.oc else '아니오'}")
 
 if __name__ == "__main__":
     main()
