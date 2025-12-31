@@ -838,7 +838,6 @@ JSON ONLY:
 4) 추가 확인 체크리스트
 """
         return llm_service.generate_text(prompt, temperature=0.1).strip()
-
     @staticmethod
     def clerk_deadline(user_input: str, legal_status: str) -> dict:
         today = datetime.now()
