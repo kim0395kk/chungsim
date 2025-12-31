@@ -1434,7 +1434,7 @@ def main():
                 use_container_width=True,
             )
 
-        with tab2:
+with tab2:
             st.subheader("🏷️ 업무유형 / 법령 상태")
             st.write(f"- 업무유형: `{task_type}`")
             st.write(f"- 법령 상태: `{legal_status}` / 소스: `{law_debug.get('source')}`")
@@ -1445,12 +1445,45 @@ def main():
             st.subheader("🧠 처리 전략(Analyst)")
             st.markdown(strategy)
 
-            st.subheader("🧾 네이버 근거(품질/리스크)")
-            st.text_area("Evidence", value=evidence_text, height=260, disabled=True)
-            st.caption(
-                f"근거품질: 총 {evsum.get('count',0)} / HIGH {evsum.get('high',0)} / MED {evsum.get('med',0)} / LOW {evsum.get('low',0)} "
-                f"/ avg {evsum.get('avg_score',0.0)} / tags {', '.join(evsum.get('top_tags',[]) or [])}"
-            )
+            # --- 이 부분을 아래 코드로 교체하세요 ---
+            st.subheader("🧾 네이버 검색 근거 (클릭 시 이동)")
+            
+            # 품질 요약 배지 표시
+            q_cols = st.columns(4)
+            q_cols[0].metric("총 검색수", f"{evsum.get('count',0)}건")
+            q_cols[1].metric("신뢰도(HIGH)", f"{evsum.get('high',0)}건")
+            q_cols[2].metric("평균 점수", f"{evsum.get('avg_score',0.0)}")
+            
+            # 리스크 태그 표시
+            if evsum.get('top_tags'):
+                st.write(" 주요 리스크 태그: " + " ".join([f"`{t}`" for t in evsum.get('top_tags')]))
+
+            st.markdown("---")
+
+            # 실제 검색 결과 리스트 (클릭 가능한 링크 생성)
+            # st.session_state["final"]["provenance"]["evidence_items"] 에 저장된 리스트 활용
+            evidence_items = final.get("provenance", {}).get("evidence_items", [])
+            
+            if not evidence_items:
+                st.info("수집된 네이버 검색 근거가 없습니다.")
+            else:
+                for it in evidence_items:
+                    # 품질 수준에 따른 색상 정의
+                    lvl = it.get("quality_level", "LOW")
+                    color = "#1e40af" if lvl == "HIGH" else "#c2410c" if lvl == "MED" else "#6b7280"
+                    
+                    # 마크다운을 이용한 클릭 가능한 링크 레이아웃
+                    st.markdown(f"""
+                    <div style="border-left: 4px solid {color}; padding-left: 15px; margin-bottom: 20px;">
+                        <span style="font-size: 0.8rem; color: {color}; font-weight: bold;">[{lvl} / {it.get('quality_score')}] {it.get('source')}</span><br>
+                        <a href="{it.get('link')}" target="_blank" style="text-decoration: none; color: #1f2937; font-size: 1.1rem; font-weight: bold;">
+                            {it.get('title')} 🔗
+                        </a><br>
+                        <span style="font-size: 0.9rem; color: #4b5563;">{it.get('description')}</span><br>
+                        <span style="font-size: 0.8rem; color: #9ca3af;">{it.get('pubDate')}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            # --- 교체 끝 ---
 
         with tab3:
             st.subheader("🧩 조문 후보(자동탐색) → 사람 선택으로 CONFIRMED 격상")
