@@ -32,7 +32,7 @@ except Exception:
 # =========================
 # 1) Page & Style
 # =========================
-st.set_page_config(layout="wide", page_title="AI Bureau: Legal Glass (Ops-Final)", page_icon="⚖️")
+st.set_page_config(layout="wide", page_title="AI Bureau: Legal Glass (Ops-Final+Naver)", page_icon="⚖️")
 
 st.markdown(
     """
@@ -52,7 +52,7 @@ st.markdown(
 .doc-body { font-size:12pt; }
 .doc-footer { text-align:center; font-size:20pt; font-weight:bold; margin-top:80px; letter-spacing:5px; }
 .stamp {
-  position:absolute; bottom:85px; right:80px; border:3px solid #c00; color:#c00;
+  position:absolute; bottom:85px; right:80px; border:3px solid #c00; color: #c00;
   padding:5px 10px; font-size:14pt; font-weight:bold; transform:rotate(-15deg);
   opacity:0.85; border-radius:5px;
 }
@@ -83,6 +83,12 @@ def clean_text(value) -> str:
 
 def safe_html(value) -> str:
     return escape(clean_text(value), quote=False).replace("\n", "<br>")
+
+def truncate_text(s: str, max_chars: int = 2500) -> str:
+    s = s or ""
+    if len(s) <= max_chars:
+        return s
+    return s[:max_chars] + "\n…(검색 결과가 길어 일부 생략됨)"
 
 def ensure_doc_shape(doc):
     fallback = {
@@ -252,7 +258,6 @@ def to_circled(n: str) -> str:
         return ""
 
 def make_law_query_candidates(hint: dict) -> list:
-    # law_name + keywords 기반으로 재탐색 후보 만들기
     law_name = norm_space(hint.get("law_name", ""))
     keywords = hint.get("keywords", []) if isinstance(hint.get("keywords", []), list) else []
 
@@ -271,7 +276,6 @@ def make_law_query_candidates(hint: dict) -> list:
         if not kw.endswith("법") and len(kw) <= 10:
             cands += [kw + "법"]
 
-    # 중복 제거(순서 유지)
     seen = set()
     out = []
     for x in cands:
@@ -299,8 +303,6 @@ class LawAPIService:
             self.enabled = (requests is not None) and (xmltodict is not None)
         except Exception:
             self.enabled = False
-
-        # 간단 캐시(같은 법령 반복 호출 방지)
         self._law_xml_cache = {}
 
     def _call_xml(self, params: dict) -> dict:
@@ -353,7 +355,6 @@ class LawAPIService:
                 return -999
             if q and q in n2:
                 s += 50
-            # 시행령/시행규칙은 본법 대비 살짝 감점(상황 따라 다르니 -2 정도)
             if "시행령" in name:
                 s -= 2
             if "시행규칙" in name:
@@ -382,19 +383,14 @@ class LawAPIService:
         return [x]
 
     def extract_article_text(self, law_xml: dict, article_no: str) -> str:
-        """
-        - '제32조', '32조', '제 32 조' 등 입력을 숫자로 정규화
-        - ArticleTitle/조문번호(@조문번호)/content/Paragraph(항번호 포함)까지 합쳐서 반환
-        """
         if not law_xml or not article_no:
             return ""
         try:
-            target_num = only_digits(article_no)  # '제32조' -> '32'
+            target_num = only_digits(article_no)
             if not target_num:
                 return ""
 
-            articles = law_xml.get("Law", {}).get("Article", [])
-            articles = self._as_list(articles)
+            articles = self._as_list(law_xml.get("Law", {}).get("Article", []))
 
             for art in articles:
                 if not isinstance(art, dict):
@@ -414,7 +410,6 @@ class LawAPIService:
                         if not isinstance(p, dict):
                             continue
 
-                        # 항 번호 필드명 변형 방어
                         pno = (
                             clean_text(p.get("ParagraphNumber", "")) or
                             clean_text(p.get("@항번호", "")) or
@@ -441,7 +436,7 @@ law_api = LawAPIService()
 
 
 # =========================
-# 5) Search Service (SerpApi requests direct)
+# 5) Search Services (SerpApi + Naver)
 # =========================
 class SearchService:
     """
@@ -453,9 +448,9 @@ class SearchService:
 
     def search_precedents(self, query: str) -> str:
         if not self.api_key:
-            return "⚠️ SERPAPI_KEY가 없어 유사 사례 검색을 생략했습니다."
+            return "⚠️ SERPAPI_KEY가 없어 Google 유사 사례 검색을 생략했습니다."
         if requests is None:
-            return "⚠️ requests 미설치: 유사 사례 검색을 생략했습니다."
+            return "⚠️ requests 미설치: Google 유사 사례 검색을 생략했습니다."
 
         try:
             url = "https://serpapi.com/search.json"
@@ -478,16 +473,80 @@ class SearchService:
 
             out = []
             for item in results[:3]:
-                title = item.get("title", "제목 없음")
-                snippet = item.get("snippet", "내용 없음")
+                title = clean_text(item.get("title", "제목 없음"))
+                snippet = clean_text(item.get("snippet", "내용 없음"))
                 link = item.get("link", "")
                 out.append(f"- **{title}**: {snippet}\n  - {link}")
 
             return "\n".join(out)
         except Exception as e:
-            return f"검색 중 오류 발생: {e}"
+            return f"Google 검색 중 오류 발생: {e}"
 
 search_service = SearchService()
+
+
+class NaverSearchService:
+    """
+    Naver Search OpenAPI
+    category: news, blog, kin, webkr
+    sort: sim(정확도), date(최신순) -> news는 date가 유리
+    """
+    def __init__(self):
+        self.client_id = st.secrets.get("naver", {}).get("CLIENT_ID")
+        self.client_secret = st.secrets.get("naver", {}).get("CLIENT_SECRET")
+        self.enabled = bool(self.client_id and self.client_secret and requests is not None)
+
+    def search(self, query: str, category: str = "news", display: int = 3, sort: str = "date") -> str:
+        if not query:
+            return "검색어가 비어있습니다."
+        if requests is None:
+            return "⚠️ requests 미설치: 네이버 검색을 생략했습니다."
+        if not self.client_id or not self.client_secret:
+            return "⚠️ 네이버 API 키가 설정되지 않았습니다."
+
+        category = (category or "news").strip()
+        if category not in ["news", "blog", "kin", "webkr"]:
+            category = "news"
+
+        # news는 date, blog/kin/webkr은 sim이 대체로 안정적
+        if category != "news" and sort == "date":
+            sort = "sim"
+
+        url = f"https://openapi.naver.com/v1/search/{category}.json"
+        headers = {
+            "X-Naver-Client-Id": self.client_id,
+            "X-Naver-Client-Secret": self.client_secret,
+        }
+        params = {
+            "query": query,
+            "display": max(1, min(int(display), 10)),
+            "sort": sort,
+        }
+
+        try:
+            r = requests.get(url, headers=headers, params=params, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+
+            items = data.get("items", []) or []
+            if not items:
+                return f"네이버 {category} 검색 결과가 없습니다."
+
+            out = []
+            for item in items[:display]:
+                title = clean_text(item.get("title", "제목 없음"))
+                link = item.get("link", "")
+                description = clean_text(item.get("description", ""))
+                # news는 pubDate가 있음
+                pub = clean_text(item.get("pubDate", "")) if category == "news" else ""
+                pub_txt = f" ({pub})" if pub else ""
+                out.append(f"- **{title}**{pub_txt}: {description}\n  - {link}")
+
+            return "\n".join(out)
+        except Exception as e:
+            return f"네이버 검색 중 오류: {e}"
+
+naver_search = NaverSearchService()
 
 
 # =========================
@@ -567,10 +626,6 @@ class LegalAgents:
 
     @staticmethod
     def fallback_candidates_only(situation: str, hint: dict) -> dict:
-        """
-        ✅ API가 실패했을 때 '원문을 쓰지 말고'
-        - 후보 법령/조문/검색어만 JSON으로 내게 함
-        """
         prompt = f"""
 <role>당신은 법령검색 보조자입니다.</role>
 <instruction>
@@ -586,9 +641,9 @@ class LegalAgents:
 
 아래 JSON만 출력:
 {{
-  "law_candidates": ["..."],         // 1~5개 (정식명칭 우선)
-  "article_candidates": ["..."],     // 0~5개 (예: '제32조', '제33조')
-  "search_queries": ["..."]          // 3~7개 (API/웹 검색용 문장)
+  "law_candidates": ["..."],
+  "article_candidates": ["..."],
+  "search_queries": ["..."]
 }}
 </instruction>
 """
@@ -612,7 +667,7 @@ class LegalAgents:
 
 [민원 상황]: {situation}
 [법적 근거]: {legal_basis}
-[유사 사례/판례]: {search_results}
+[유사 사례/뉴스/판례/실무사례]: {search_results}
 
 위 정보를 종합하여 이 민원을 처리하기 위한 **대략적인 업무 처리 방향(Strategy)**을 수립하세요.
 다음 3가지 항목 포함(마크다운):
@@ -624,10 +679,6 @@ class LegalAgents:
 
     @staticmethod
     def clerk(situation, legal_basis):
-        """
-        운영 안전:
-        - legal_basis가 비어있거나 PENDING일 때는 모델이 흔들릴 수 있어 기본값 15로 수렴되게 설계.
-        """
         today = datetime.now()
         prompt = f"""
 오늘: {today.strftime('%Y-%m-%d')}
@@ -692,7 +743,7 @@ class LegalAgents:
 
 
 # =========================
-# 8) Workflow (운영용 최종 보정)
+# 8) Workflow (운영용 최종 보정 + Naver)
 # =========================
 def run_workflow(user_input: str):
     log_placeholder = st.empty()
@@ -710,7 +761,7 @@ def run_workflow(user_input: str):
         return time.perf_counter()
 
     # Phase 1
-    add_log("🔍 Phase 1: 법령(힌트→API 확정) 및 유사 사례 리서치 중...", "legal")
+    add_log("🔍 Phase 1: 법령(힌트→API 확정) 및 사례/뉴스 리서치 중...", "legal")
 
     t0 = tick()
     hint = LegalAgents.law_hint(user_input)
@@ -738,7 +789,7 @@ def run_workflow(user_input: str):
                 if chosen.get("law_id"):
                     best_law = chosen
                     best_from_query = q
-                    break  # 운영: 속도 우선(첫 성공)
+                    break
 
             if best_law.get("law_id"):
                 law_xml = law_api.get_law_xml(best_law["law_id"])
@@ -801,23 +852,45 @@ def run_workflow(user_input: str):
         )
         law_debug = {"source": "LLM_CANDIDATES_ONLY"}
 
-    # ✅ 법적근거 상태 플래그(공문에 경고문 그대로 박히는 사고 방지용)
     legal_basis_is_confirmed = (law_debug.get("source") == "LAW_API_SUCCESS") and ("⚠️" not in (legal_basis or ""))
     legal_status_msg = "CONFIRMED" if legal_basis_is_confirmed else "PENDING"
 
-    # Search
-    add_log("🌍 유사 사례(SerpApi) 검색 중...", "search")
+    # ✅ Search (SerpApi + Naver)
+    add_log("🌍 유사 사례/뉴스 검색 중... (Google+Naver)", "search")
     t0 = tick()
-    search_results = search_service.search_precedents(user_input)
-    timing["유사사례 검색(ms)"] = int((tick() - t0) * 1000)
 
-    with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
+    google_results = search_service.search_precedents(user_input)
+
+    # 네이버: 뉴스(최신순) + 블로그(유사사례)
+    if naver_search.enabled:
+        naver_news = naver_search.search(user_input, category="news", display=3, sort="date")
+        naver_blog = naver_search.search(user_input, category="blog", display=3, sort="sim")
+        naver_kin = naver_search.search(user_input, category="kin", display=2, sort="sim")
+    else:
+        naver_news = "⚠️ 네이버 API 미설정 또는 requests 미설치: Naver 검색 생략"
+        naver_blog = ""
+        naver_kin = ""
+
+    search_results = (
+        "[Google(SerpApi) 검색 결과]\n"
+        f"{google_results}\n\n"
+        "[Naver 뉴스(최신순) 결과]\n"
+        f"{naver_news}\n\n"
+        "[Naver 블로그(실무사례) 결과]\n"
+        f"{naver_blog}\n\n"
+        "[Naver 지식iN(민원 반응/쟁점) 결과]\n"
+        f"{naver_kin}\n"
+    )
+    search_results = truncate_text(search_results, max_chars=3500)
+    timing["유사사례/뉴스 검색(ms)"] = int((tick() - t0) * 1000)
+
+    with st.expander("✅ [검토] 법령 및 유사 사례/뉴스 확인", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             st.info(f"**적용 법령(원문 유지/후보는 경고 표시)**\n\n{legal_basis}")
             st.caption(f"법령 소스: {law_debug.get('source')} / 상태: {legal_status_msg}")
         with c2:
-            st.warning(f"**유사 사례 검색 결과**\n\n{search_results}")
+            st.warning(f"**사례/뉴스 검색 결과**\n\n{search_results}")
 
     # Strategy
     add_log("🧠 Phase 2: 업무 처리 방향(전략) 수립 중...", "strat")
@@ -832,8 +905,6 @@ def run_workflow(user_input: str):
 
     # Deadline + Draft
     add_log("📅 Phase 3: 기한 산정 및 공문(JSON) 작성 중...", "calc")
-
-    # ✅ 운영 안전: 법적근거가 미확정이면 clerk가 법령에 끌려가지 않게 비워서 기본값(15일)에 수렴
     meta_info = LegalAgents.clerk(user_input, legal_basis if legal_basis_is_confirmed else "")
     add_log(f"⏳ 기한 설정: {meta_info['days_added']}일 후 ({meta_info['deadline_str']})", "calc")
 
@@ -856,7 +927,6 @@ def run_workflow(user_input: str):
     time.sleep(0.15)
     log_placeholder.empty()
 
-    # Metrics 누적 (run)
     m = st.session_state["metrics"]
     m["runs"] += 1
     m["timing"].append(timing)
@@ -904,8 +974,8 @@ def main():
     col_left, col_right = st.columns([1, 1.2])
 
     with col_left:
-        st.title("⚖️ AI 행정관 Pro (Ops-Final)")
-        st.caption("LAW API + LLM + SerpApi(requests) + DB + Metrics (Hallucination-Guard + Pending-Aware)")
+        st.title("⚖️ AI 행정관 Pro (Ops-Final+Naver)")
+        st.caption("LAW API + LLM + SerpApi(requests) + Naver OpenAPI + DB + Metrics (Hallucination-Guard + Pending-Aware)")
         st.markdown("---")
 
         user_input = st.text_area(
@@ -925,7 +995,8 @@ def main():
 
         st.markdown("### ⚙️ 상태")
         st.write(f"- LAW API: {'ON' if law_api.enabled else 'OFF'} (requests+xmltodict+secrets 필요)")
-        st.write(f"- SerpApi 검색: {'ON' if (requests is not None and st.secrets.get('general', {}).get('SERPAPI_KEY')) else 'OFF'} (requests+SERPAPI_KEY 필요)")
+        st.write(f"- Google(SerpApi): {'ON' if (requests is not None and st.secrets.get('general', {}).get('SERPAPI_KEY')) else 'OFF'} (requests+SERPAPI_KEY 필요)")
+        st.write(f"- Naver 검색: {'ON' if naver_search.enabled else 'OFF'} (requests+naver.CLIENT_ID/SECRET 필요)")
         st.write(f"- DB(Supabase): {'ON' if db_service.is_active else 'OFF'}")
 
         if run_btn:
