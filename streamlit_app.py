@@ -806,8 +806,9 @@ JSON ONLY:
             }
         }
 
-    @staticmethod
+@staticmethod
     def analyst(user_input: str, legal_basis: str, evidence_text: str, evidence_summary: dict) -> str:
+        # f-string 시작 시점과 내부 문장들의 들여쓰기를 일치시켜야 합니다.
         prompt = f"""
 당신은 행정업무 베테랑 주무관이다.
 
@@ -830,10 +831,10 @@ JSON ONLY:
 - BLOG/KIN/AD_RISK/PERSONAL_RISK/THIN 태그가 있는 항목은 참고만(단정 근거 금지)
 - 법령이 PENDING 또는 SEMI_CONFIRMED이면 처분 강도를 낮추고 확인/자료요청/안내 중심으로
 
-아래를 마크다운으로 작성:
+아래 내용을 토대로 마크다운으로 작성하라:
 1) 처리 방향(실무 단계별)
 2) 핵심 주의사항(증거/절차/기한/통지 방식)
-3) 예상 반발 & 대응
+3) 예상 반발 및 대응
 4) 추가 확인 체크리스트
 """
         return llm_service.generate_text(prompt, temperature=0.1).strip()
