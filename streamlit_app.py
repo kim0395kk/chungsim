@@ -755,11 +755,12 @@ db_service = DatabaseService()
 
 
 # =========================
-# 8) Agents
+# 8) Agents (오류 수정 및 법령 검색 강화 버전)
 # =========================
 class TGD_Agents:
     @staticmethod
     def planner(user_input: str) -> dict:
+        # 프롬프트 문자열 끝에 반드시 """를 닫아주어야 합니다.
         prompt = f"""
 상황: "{user_input}"
 너는 행정업무 '플래너'다.
@@ -775,6 +776,7 @@ JSON ONLY:
   "law_hint": {{"law_name":"", "article_no":"", "keywords":[]}},
   "naver_queries": {{"news":[], "blog":[], "kin":[]}}
 }}
+"""
         obj = llm_service.generate_json(prompt)
         if not isinstance(obj, dict):
             return {"task_type": "", "law_hint": {"law_name":"", "article_no":"", "keywords":[]}, "naver_queries": {"news":[], "blog":[], "kin":[]}}
@@ -806,9 +808,8 @@ JSON ONLY:
             }
         }
 
-@staticmethod
+    @staticmethod
     def analyst(user_input: str, legal_basis: str, evidence_text: str, evidence_summary: dict) -> str:
-        # f-string 시작 시점과 내부 문장들의 들여쓰기를 일치시켜야 합니다.
         prompt = f"""
 당신은 행정업무 베테랑 주무관이다.
 
@@ -832,12 +833,13 @@ JSON ONLY:
 - 법령이 PENDING 또는 SEMI_CONFIRMED이면 처분 강도를 낮추고 확인/자료요청/안내 중심으로
 
 아래 내용을 토대로 마크다운으로 작성하라:
-1) 처리 방향(실무 단계별)
-2) 핵심 주의사항(증거/절차/기한/통지 방식)
-3) 예상 반발 및 대응
-4) 추가 확인 체크리스트
+1. 처리 방향 (실무 단계별)
+2. 핵심 주의사항 (증거/절차/기한/통지 방식)
+3. 예상 반발 및 대응
+4. 추가 확인 체크리스트
 """
         return llm_service.generate_text(prompt, temperature=0.1).strip()
+
     @staticmethod
     def clerk_deadline(user_input: str, legal_status: str) -> dict:
         today = datetime.now()
@@ -874,7 +876,7 @@ JSON ONLY:
 - 담당자: {officer}
 - 상황: {user_input}
 - 법적 근거(원문 유지): {legal_basis}
-- 법적 근거 상태: {legal_status}  # CONFIRMED / SEMI_CONFIRMED / PENDING
+- 법적 근거 상태: {legal_status}
 - 시행일자: {meta.get("today_str")}
 - 기한: {meta.get("deadline_str")} ({meta.get("days_added")}일)
 - 처리전략:
@@ -882,16 +884,10 @@ JSON ONLY:
 
 [핵심 규칙]
 - 절대 새로운 법조문/없는 법령을 만들지 말 것.
-- PENDING: "관련 법령 검토 중/조항 확인 필요"로 처리, 안내/자료요청/확인 중심.
+- PENDING: "관련 법령 검토 중/조항 확인 필요"로 처리.
 - SEMI_CONFIRMED: "자동매칭(최종 확인 필요)" 표기.
-- CONFIRMED: 원문 확정, 인용 가능.
 
-[출력 규칙]
-- HTML/태그/마크다운/코드블록 금지
-- 본문은 순수 텍스트 문단
-- 구조: [경위] -> [근거] -> [처분 내용] -> [권리구제 절차]
-- JSON ONLY
-
+JSON ONLY:
 {{
   "title": "공문 제목",
   "receiver": "수신인",
@@ -901,7 +897,6 @@ JSON ONLY:
 """
         obj = llm_service.generate_json(prompt)
         return ensure_doc_shape(obj)
-
 
 # =========================
 # 9) Workflow (Law Resolver + Evidence)
