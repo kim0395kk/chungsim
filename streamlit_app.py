@@ -1,3 +1,5 @@
+# app.py  (AI Bureau: Legal Glass - TGD Ops-Final v3)  ✅ FULL SET
+
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -7,8 +9,6 @@ import time
 from datetime import datetime, timedelta
 from html import escape, unescape
 from urllib.parse import urlparse
-
-from groq import Groq
 
 # =========================
 # Optional imports (안죽게)
@@ -28,11 +28,20 @@ try:
 except Exception:
     create_client = None
 
+try:
+    from groq import Groq
+except Exception:
+    Groq = None
+
 
 # =========================
 # 1) Page & Style
 # =========================
-st.set_page_config(layout="wide", page_title="AI Bureau: Legal Glass (TGD Ops-Final v3)", page_icon="⚖️")
+st.set_page_config(
+    layout="wide",
+    page_title="AI Bureau: Legal Glass (TGD Ops-Final v3)",
+    page_icon="⚖️",
+)
 
 st.markdown(
     """
@@ -71,6 +80,7 @@ st.markdown(
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
+
 def clean_text(value) -> str:
     if value is None:
         return ""
@@ -82,14 +92,17 @@ def clean_text(value) -> str:
     s = s.replace("</", "").replace("/>", "").replace("<", "").replace(">", "")
     return s.strip()
 
+
 def safe_html(value) -> str:
     return escape(clean_text(value), quote=False).replace("\n", "<br>")
+
 
 def truncate_text(s: str, max_chars: int = 3800) -> str:
     s = s or ""
     if len(s) <= max_chars:
         return s
     return s[:max_chars] + "\n…(결과가 길어 일부 생략됨)"
+
 
 def ensure_doc_shape(doc):
     fallback = {
@@ -140,10 +153,12 @@ MODEL_PRICES_PER_1M = {
     "LLM FAILED": 0.0,
 }
 
+
 def estimate_tokens(text: str) -> int:
     if not text:
         return 0
-    return max(1, int(len(text) / 3.5))7
+    return max(1, int(len(text) / 3.5))
+
 
 def metrics_init():
     if "metrics" not in st.session_state:
@@ -155,7 +170,11 @@ def metrics_init():
             "timing": [],
         }
 
+
 def metrics_add(model_name: str, prompt: str, output: str):
+    if "metrics" not in st.session_state:
+        metrics_init()
+
     m = st.session_state["metrics"]
     m["calls"][model_name] = m["calls"].get(model_name, 0) + 1
     t = estimate_tokens(prompt) + estimate_tokens(output)
@@ -184,7 +203,7 @@ def parse_first_json_object(text: str) -> dict:
         s = raw.find("{")
         e = raw.rfind("}")
         if s != -1 and e != -1 and e > s:
-            candidate = raw[s:e+1].strip()
+            candidate = raw[s : e + 1].strip()
             return json.loads(candidate)
     except Exception:
         pass
@@ -194,7 +213,7 @@ def parse_first_json_object(text: str) -> dict:
         dec = json.JSONDecoder()
         for i in range(len(raw)):
             if raw[i] == "{":
-                obj, end = dec.raw_decode(raw[i:])
+                obj, _end = dec.raw_decode(raw[i:])
                 if isinstance(obj, dict):
                     return obj
     except Exception:
@@ -208,9 +227,13 @@ def parse_first_json_object(text: str) -> dict:
 # =========================
 class LLMService:
     def __init__(self):
-        self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
+        try:
+            self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
+        except Exception:
+            self.groq_key = None
+
         self.last_model_used = "N/A"
-        self.groq_client = Groq(api_key=self.groq_key) if self.groq_key else None
+        self.groq_client = Groq(api_key=self.groq_key) if (Groq and self.groq_key) else None
 
     def generate_text(self, prompt: str, temperature: float = 0.1) -> str:
         last_err = None
@@ -237,6 +260,7 @@ class LLMService:
         obj = parse_first_json_object(raw)
         return obj if isinstance(obj, dict) else {}
 
+
 llm_service = LLMService()
 
 
@@ -246,19 +270,42 @@ llm_service = LLMService()
 def norm_space(s: str) -> str:
     return re.sub(r"\s+", " ", clean_text(s or "")).strip()
 
+
 def only_digits(s: str) -> str:
     return re.sub(r"[^0-9]", "", clean_text(s or ""))
 
+
 _CIRCLED = {
-    1:"①", 2:"②", 3:"③", 4:"④", 5:"⑤", 6:"⑥", 7:"⑦", 8:"⑧", 9:"⑨", 10:"⑩",
-    11:"⑪", 12:"⑫", 13:"⑬", 14:"⑭", 15:"⑮", 16:"⑯", 17:"⑰", 18:"⑱", 19:"⑲", 20:"⑳"
+    1: "①",
+    2: "②",
+    3: "③",
+    4: "④",
+    5: "⑤",
+    6: "⑥",
+    7: "⑦",
+    8: "⑧",
+    9: "⑨",
+    10: "⑩",
+    11: "⑪",
+    12: "⑫",
+    13: "⑬",
+    14: "⑭",
+    15: "⑮",
+    16: "⑯",
+    17: "⑰",
+    18: "⑱",
+    19: "⑲",
+    20: "⑳",
 }
+
+
 def to_circled(n: str) -> str:
     try:
         i = int(re.sub(r"[^0-9]", "", n or ""))
         return _CIRCLED.get(i, f"({i})")
     except Exception:
         return ""
+
 
 def make_law_query_candidates(law_name: str, keywords: list) -> list:
     """
@@ -299,9 +346,11 @@ def make_law_query_candidates(law_name: str, keywords: list) -> list:
 class LawAPIService:
     def __init__(self):
         self.enabled = False
+        self.oc = None
+        self.base_url = "https://www.law.go.kr/DRF/lawService.do"
         try:
             self.oc = st.secrets["law"]["LAW_API_ID"]
-            self.base_url = st.secrets["law"].get("BASE_URL", "https://www.law.go.kr/DRF/lawService.do")
+            self.base_url = st.secrets["law"].get("BASE_URL", self.base_url)
             self.enabled = (requests is not None) and (xmltodict is not None) and bool(self.oc)
         except Exception:
             self.enabled = False
@@ -315,40 +364,47 @@ class LawAPIService:
         return xmltodict.parse(r.text)
 
     def _as_list(self, x):
-        if x is None: return []
-        if isinstance(x, list): return x
+        if x is None:
+            return []
+        if isinstance(x, list):
+            return x
         return [x]
 
     def search_law_candidates(self, query: str, display: int = 20) -> list:
         if not self.enabled or not query:
             return []
-        # 검색어 정제
         clean_query = re.sub(r"[^가-힣a-zA-Z0-9 ]", "", query).strip()
-        data = self._call_xml({
-            "OC": self.oc, 
-            "target": "law", 
-            "type": "XML",
-            "query": clean_query, 
-            "display": max(1, min(display, 50)),
-        })
+        data = self._call_xml(
+            {
+                "OC": self.oc,
+                "target": "law",
+                "type": "XML",
+                "query": clean_query,
+                "display": max(1, min(display, 50)),
+            }
+        )
         try:
             law = data.get("LawSearch", {}).get("law")
-            if not law: return []
-            if isinstance(law, dict): law = [law]
+            if not law:
+                return []
+            if isinstance(law, dict):
+                law = [law]
             out = []
             for item in law:
-                if not isinstance(item, dict): continue
-                out.append({
-                    "law_id": item.get("lawId", ""),
-                    "law_name": item.get("lawNm", ""),
-                    "law_type": item.get("lawType", ""),
-                })
+                if not isinstance(item, dict):
+                    continue
+                out.append(
+                    {
+                        "law_id": item.get("lawId", ""),
+                        "law_name": item.get("lawNm", ""),
+                        "law_type": item.get("lawType", ""),
+                    }
+                )
             return out
         except Exception:
             return []
 
     def choose_best_law(self, candidates: list, query: str) -> dict:
-        """들여쓰기 오류가 나지 않도록 정렬된 메서드"""
         q = norm_space(query).replace(" ", "")
         if not candidates:
             return {}
@@ -357,10 +413,14 @@ class LawAPIService:
             name = norm_space(item.get("law_name", ""))
             n2 = name.replace(" ", "")
             s = 0
-            if not name: return -999
-            if q and q in n2: s += 50
-            if "시행령" in name: s -= 2
-            if "시행규칙" in name: s -= 2
+            if not name:
+                return -999
+            if q and q in n2:
+                s += 50
+            if "시행령" in name:
+                s -= 2
+            if "시행규칙" in name:
+                s -= 2
             s -= max(0, len(name) - 12) * 0.2
             return s
 
@@ -368,8 +428,10 @@ class LawAPIService:
         return best if best.get("law_id") else {}
 
     def get_law_xml(self, law_id: str) -> dict:
-        if not self.enabled or not law_id: return {}
-        if law_id in self._law_xml_cache: return self._law_xml_cache[law_id]
+        if not self.enabled or not law_id:
+            return {}
+        if law_id in self._law_xml_cache:
+            return self._law_xml_cache[law_id]
         data = self._call_xml({"OC": self.oc, "target": "law", "type": "XML", "ID": law_id})
         self._law_xml_cache[law_id] = data
         return data
@@ -384,7 +446,8 @@ class LawAPIService:
                 return f"제{m.group(1)}조" if m else ""
             num = int(d[:4]) if len(d) >= 4 else int(d)
             return f"제{num}조"
-        except Exception: return ""
+        except Exception:
+            return ""
 
     def build_article_fulltext(self, art: dict) -> str:
         try:
@@ -393,70 +456,91 @@ class LawAPIService:
             paragraphs = self._as_list(art.get("Paragraph"))
             p_texts = []
             for p in paragraphs:
-                if not isinstance(p, dict): continue
+                if not isinstance(p, dict):
+                    continue
                 pno = clean_text(p.get("@항번호", "")) or clean_text(p.get("ParagraphNo", ""))
                 ptxt = clean_text(p.get("ParagraphContent", ""))
-                if not ptxt: continue
+                if not ptxt:
+                    continue
                 prefix = (to_circled(pno) + " ") if pno else ""
                 p_texts.append(f"{prefix}{ptxt}")
             joined = "\n".join([x for x in [title, content, "\n".join(p_texts)] if x])
             return clean_text(joined)
-        except Exception: return ""
+        except Exception:
+            return ""
 
     def extract_article_text(self, law_xml: dict, article_no: str) -> str:
-        if not self.enabled or not law_xml or not article_no: return ""
+        if not self.enabled or not law_xml or not article_no:
+            return ""
         try:
             target_num = only_digits(article_no)
-            if not target_num: return ""
+            if not target_num:
+                return ""
             articles = self._as_list(law_xml.get("Law", {}).get("Article", []))
             for art in articles:
-                if not isinstance(art, dict): continue
+                if not isinstance(art, dict):
+                    continue
                 curr_art_no = clean_text(art.get("@조문번호", ""))
                 title = clean_text(art.get("ArticleTitle") or art.get("title") or "")
                 title_hit = (target_num in only_digits(title)) or (target_num in title)
-                no_hit = (target_num in curr_art_no)
+                no_hit = target_num in curr_art_no
                 if title_hit or no_hit:
                     return self.build_article_fulltext(art)
-        except Exception: pass
+        except Exception:
+            pass
         return ""
 
     def find_article_candidates(self, law_xml: dict, keywords: list, topk: int = 5) -> list:
-        if not self.enabled or not law_xml: return []
+        if not self.enabled or not law_xml:
+            return []
         keywords = [clean_text(k) for k in (keywords or []) if clean_text(k)]
-        if not keywords: return []
+        if not keywords:
+            return []
         articles = self._as_list(law_xml.get("Law", {}).get("Article", []))
         scored = []
         for art in articles:
-            if not isinstance(art, dict): continue
+            if not isinstance(art, dict):
+                continue
             title = clean_text(art.get("ArticleTitle") or art.get("title") or "")
             fulltext = self.build_article_fulltext(art)
-            if not fulltext: continue
+            if not fulltext:
+                continue
             text_low = fulltext.lower()
             score = 0
             for kw in keywords:
                 kw_low = kw.lower()
-                if kw_low in title.lower(): score += 8
-                if kw_low in text_low: score += 3
-            if score <= 0: continue
-            scored.append({
-                "article_no": self._article_no_display(art),
-                "title": title,
-                "score": score,
-                "text_excerpt": fulltext[:220] + "...",
-                "fulltext": fulltext,
-            })
+                if kw_low in title.lower():
+                    score += 8
+                if kw_low in text_low:
+                    score += 3
+            if score <= 0:
+                continue
+            scored.append(
+                {
+                    "article_no": self._article_no_display(art),
+                    "title": title,
+                    "score": score,
+                    "text_excerpt": fulltext[:220] + "...",
+                    "fulltext": fulltext,
+                }
+            )
         scored.sort(key=lambda x: x["score"], reverse=True)
         return scored[:topk]
 
+
 law_api = LawAPIService()
+
 
 # =========================
 # 6) Naver Search + Evidence Risk Tagging (enabled 2중 안전)
 # =========================
 class NaverSearchService:
     def __init__(self):
-        self.client_id = st.secrets.get("naver", {}).get("CLIENT_ID")
-        self.client_secret = st.secrets.get("naver", {}).get("CLIENT_SECRET")
+        try:
+            self.client_id = st.secrets.get("naver", {}).get("CLIENT_ID")
+            self.client_secret = st.secrets.get("naver", {}).get("CLIENT_SECRET")
+        except Exception:
+            self.client_id, self.client_secret = None, None
         self.enabled = bool(self.client_id and self.client_secret and requests is not None)
 
     def _req(self, endpoint: str, params: dict):
@@ -489,18 +573,22 @@ class NaverSearchService:
                 link = clean_text(it.get("link", ""))
                 desc = clean_text(it.get("description", ""))
                 pub = clean_text(it.get("pubDate", "")) if category == "news" else ""
-                out.append({
-                    "source": f"naver:{category}",
-                    "title": title,
-                    "description": desc,
-                    "link": link,
-                    "pubDate": pub,
-                })
+                out.append(
+                    {
+                        "source": f"naver:{category}",
+                        "title": title,
+                        "description": desc,
+                        "link": link,
+                        "pubDate": pub,
+                    }
+                )
             return out
         except Exception:
             return []
 
+
 naver_search = NaverSearchService()
+
 
 def _norm_key(s: str) -> str:
     s = norm_space(s).lower()
@@ -508,8 +596,10 @@ def _norm_key(s: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
+
 _AD_PATTERNS = ["협찬", "광고", "체험단", "원고료", "홍보", "제공받", "파트너", "프로모션"]
 _PERSONAL_PATTERNS = ["후기", "경험", "일기", "리뷰", "내돈내산", "썰", "느낌", "개인", "주관"]
+
 
 def tag_evidence_item(it: dict) -> dict:
     src = it.get("source", "")
@@ -571,6 +661,7 @@ def tag_evidence_item(it: dict) -> dict:
     it2["risk_tags"] = sorted(list(set(tags)))
     return it2
 
+
 def normalize_evidence(items: list, max_items: int = 12) -> list:
     if not isinstance(items, list):
         return []
@@ -587,16 +678,21 @@ def normalize_evidence(items: list, max_items: int = 12) -> list:
         if key in seen:
             continue
         seen.add(key)
-        out.append(tag_evidence_item({
-            "source": it.get("source", ""),
-            "title": title,
-            "description": norm_space(it.get("description", "")),
-            "link": link,
-            "pubDate": norm_space(it.get("pubDate", "")),
-        }))
+        out.append(
+            tag_evidence_item(
+                {
+                    "source": it.get("source", ""),
+                    "title": title,
+                    "description": norm_space(it.get("description", "")),
+                    "link": link,
+                    "pubDate": norm_space(it.get("pubDate", "")),
+                }
+            )
+        )
         if len(out) >= max_items:
             break
     return out
+
 
 def evidence_to_text(evidence: list) -> str:
     lines = []
@@ -611,6 +707,7 @@ def evidence_to_text(evidence: list) -> str:
             f"  - {it.get('link')}"
         )
     return "\n".join(lines) if lines else "검색 결과가 없습니다."
+
 
 def evidence_quality_summary(evidence: list) -> dict:
     if not evidence:
@@ -649,31 +746,27 @@ class DatabaseService:
         return self.client.table("law_logs").insert(data).execute()
 
     def save_log(self, payload: dict):
-        """
-        ✅ 개선 포인트:
-        - 확장 컬럼이 DB에 없으면 PostgREST 에러가 나므로
-        - 에러 메시지에 따라 "unknown column"로 추정되는 필드를 순차 제거하고 재시도
-        - 최종 실패 시 최소 컬럼(slim)로 저장 시도
-        """
         if not self.is_active:
             return "DB 미연결 (저장 건너뜀)"
 
         base = dict(payload or {})
         base["created_at"] = base.get("created_at") or datetime.now().isoformat()
 
-        # 1) 전체 insert 시도
         try:
             self._attempt_insert(base)
             return "DB 저장 성공"
         except Exception as e1:
-            msg = str(e1)
+            _msg = str(e1)
 
-        # 2) 스키마 불일치 추정: 안전 축소(몇 개 필드 제거)
-        #   - 확장 필드 목록(없어도 무방)
         shrink_order = [
-            "evidence_quality", "provenance", "legal_status",
-            "task_type", "dept", "officer",
-            "model_usage", "timing",
+            "evidence_quality",
+            "provenance",
+            "legal_status",
+            "task_type",
+            "dept",
+            "officer",
+            "model_usage",
+            "timing",
         ]
         temp = dict(base)
         for k in shrink_order:
@@ -685,7 +778,6 @@ class DatabaseService:
                 except Exception:
                     continue
 
-        # 3) 최후: 최소 컬럼만
         try:
             slim = {
                 "input_text": base.get("input_text"),
@@ -751,16 +843,16 @@ class DatabaseService:
             by_officer[o] = by_officer.get(o, 0) + 1
         return by_task, by_dept, by_officer
 
+
 db_service = DatabaseService()
 
 
 # =========================
-# 8) Agents (오류 수정 및 법령 검색 강화 버전)
+# 8) Agents
 # =========================
 class TGD_Agents:
     @staticmethod
     def planner(user_input: str) -> dict:
-        # 프롬프트 문자열 끝에 반드시 """를 닫아주어야 합니다.
         prompt = f"""
 상황: "{user_input}"
 너는 행정업무 '플래너'다.
@@ -779,7 +871,11 @@ JSON ONLY:
 """
         obj = llm_service.generate_json(prompt)
         if not isinstance(obj, dict):
-            return {"task_type": "", "law_hint": {"law_name":"", "article_no":"", "keywords":[]}, "naver_queries": {"news":[], "blog":[], "kin":[]}}
+            return {
+                "task_type": "",
+                "law_hint": {"law_name": "", "article_no": "", "keywords": []},
+                "naver_queries": {"news": [], "blog": [], "kin": []},
+            }
 
         lh = obj.get("law_hint", {}) if isinstance(obj.get("law_hint", {}), dict) else {}
         nq = obj.get("naver_queries", {}) if isinstance(obj.get("naver_queries", {}), dict) else {}
@@ -795,17 +891,17 @@ JSON ONLY:
             return [norm_space(i) for i in x if norm_space(i)][:3]
 
         return {
-            "task_type": norm_space(obj.get("task_type","")),
+            "task_type": norm_space(obj.get("task_type", "")),
             "law_hint": {
-                "law_name": norm_space(lh.get("law_name","")),
-                "article_no": norm_space(lh.get("article_no","")),
+                "law_name": norm_space(lh.get("law_name", "")),
+                "article_no": norm_space(lh.get("article_no", "")),
                 "keywords": kws,
             },
             "naver_queries": {
                 "news": list3(nq.get("news", [])),
                 "blog": list3(nq.get("blog", [])),
-                "kin":  list3(nq.get("kin", [])),
-            }
+                "kin": list3(nq.get("kin", [])),
+            },
         }
 
     @staticmethod
@@ -867,7 +963,15 @@ JSON ONLY:
         }
 
     @staticmethod
-    def drafter(user_input: str, legal_basis: str, legal_status: str, meta: dict, strategy_md: str, dept: str, officer: str) -> dict:
+    def drafter(
+        user_input: str,
+        legal_basis: str,
+        legal_status: str,
+        meta: dict,
+        strategy_md: str,
+        dept: str,
+        officer: str,
+    ) -> dict:
         prompt = f"""
 당신은 행정기관의 베테랑 서기다. 아래 정보를 바탕으로 완결 공문서를 작성한다.
 
@@ -898,6 +1002,7 @@ JSON ONLY:
         obj = llm_service.generate_json(prompt)
         return ensure_doc_shape(obj)
 
+
 # =========================
 # 9) Workflow (Law Resolver + Evidence)
 # =========================
@@ -906,7 +1011,7 @@ def resolve_law_with_status(law_hint: dict) -> dict:
         return {
             "legal_status": "PENDING",
             "legal_basis": "⚠️ LAW API OFF (requests/xmltodict/secrets 확인 필요)",
-            "law_debug": {"source": "LAW_API_OFF"}
+            "law_debug": {"source": "LAW_API_OFF"},
         }
 
     law_name = law_hint.get("law_name", "")
@@ -920,7 +1025,13 @@ def resolve_law_with_status(law_hint: dict) -> dict:
     for q in queries:
         law_cands = law_api.search_law_candidates(q, display=20)
         chosen = law_api.choose_best_law(law_cands, q)
-        traces.append({"query": q, "count": len(law_cands), "top": (law_cands[0].get("law_name","") if law_cands else "")})
+        traces.append(
+            {
+                "query": q,
+                "count": len(law_cands),
+                "top": (law_cands[0].get("law_name", "") if law_cands else ""),
+            }
+        )
         if chosen.get("law_id"):
             best_law = chosen
             best_from_query = q
@@ -930,15 +1041,13 @@ def resolve_law_with_status(law_hint: dict) -> dict:
         return {
             "legal_status": "PENDING",
             "legal_basis": "⚠️ LAW API에서 법령을 찾지 못했습니다. (법령명/키워드 보강 필요)",
-            "law_debug": {"source": "LAW_API_NO_LAW", "queries": queries, "traces": traces}
+            "law_debug": {"source": "LAW_API_NO_LAW", "queries": queries, "traces": traces},
         }
 
     law_xml = law_api.get_law_xml(best_law["law_id"])
 
-    # 1) 조문번호 직접
     article_text = law_api.extract_article_text(law_xml, article_no) if article_no else ""
 
-    # 2) 실패 시 키워드 자동탐색
     auto_candidates = []
     chosen_auto = None
     if not article_text:
@@ -948,7 +1057,6 @@ def resolve_law_with_status(law_hint: dict) -> dict:
             article_text = chosen_auto.get("fulltext", "")
             article_no = chosen_auto.get("article_no", "") or article_no
 
-    # 3) 상태 결정
     if article_text and chosen_auto is None and article_no:
         return {
             "legal_status": "CONFIRMED",
@@ -961,7 +1069,7 @@ def resolve_law_with_status(law_hint: dict) -> dict:
                 "query_used": best_from_query,
                 "auto_candidates": [],
                 "traces": traces,
-            }
+            },
         }
 
     if article_text and chosen_auto is not None:
@@ -976,7 +1084,7 @@ def resolve_law_with_status(law_hint: dict) -> dict:
                 "query_used": best_from_query,
                 "auto_candidates": auto_candidates,
                 "traces": traces,
-            }
+            },
         }
 
     return {
@@ -996,8 +1104,9 @@ def resolve_law_with_status(law_hint: dict) -> dict:
             "query_used": best_from_query,
             "auto_candidates": auto_candidates,
             "traces": traces,
-        }
+        },
     }
+
 
 def collect_naver_evidence(naver_queries: dict, fallback_query: str) -> dict:
     if not naver_search.enabled:
@@ -1010,14 +1119,17 @@ def collect_naver_evidence(naver_queries: dict, fallback_query: str) -> dict:
 
     news_qs = naver_queries.get("news", []) if isinstance(naver_queries, dict) else []
     blog_qs = naver_queries.get("blog", []) if isinstance(naver_queries, dict) else []
-    kin_qs  = naver_queries.get("kin", []) if isinstance(naver_queries, dict) else []
+    kin_qs = naver_queries.get("kin", []) if isinstance(naver_queries, dict) else []
 
-    if not news_qs: news_qs = [fallback_query]
-    if not blog_qs: blog_qs = [fallback_query]
-    if not kin_qs:  kin_qs  = [fallback_query]
+    if not news_qs:
+        news_qs = [fallback_query]
+    if not blog_qs:
+        blog_qs = [fallback_query]
+    if not kin_qs:
+        kin_qs = [fallback_query]
 
     raw = []
-    cnt = {"news":0, "blog":0, "kin":0}
+    cnt = {"news": 0, "blog": 0, "kin": 0}
 
     for q in news_qs[:2]:
         items = naver_search.search(q, category="news", display=5, sort="date")
@@ -1071,9 +1183,9 @@ def run_workflow(user_input: str, dept: str, officer: str):
     law_res = resolve_law_with_status(plan.get("law_hint", {}))
     timing["LawResolver(ms)"] = int((tick() - t0) * 1000)
 
-    legal_status = law_res["legal_status"]
-    legal_basis = law_res["legal_basis"]
-    law_debug = law_res["law_debug"]
+    legal_status = law_res.get("legal_status", "PENDING")
+    legal_basis = law_res.get("legal_basis", "")
+    law_debug = law_res.get("law_debug", {})
     provenance["law_debug"] = law_debug
     add_log(f"✅ 법령 상태: {legal_status} / 소스: {law_debug.get('source')}", "legal")
 
@@ -1090,7 +1202,7 @@ def run_workflow(user_input: str, dept: str, officer: str):
     provenance["evidence_summary"] = evidence_summary
     provenance["evidence_raw_counts"] = ev.get("raw_counts", {})
 
-    # 법령 후보 선택 UI는 main()에서 탭으로 노출 (세션 오버라이드)
+    # ✅ 사용자 선택 조문 오버라이드 반영
     if st.session_state.get("override_legal"):
         ov = st.session_state["override_legal"]
         legal_status = ov.get("status", legal_status)
@@ -1142,6 +1254,7 @@ def run_workflow(user_input: str, dept: str, officer: str):
     m["runs"] += 1
     m["timing"].append(timing)
 
+    # ✅ UI 탭2가 읽을 수 있게 provenance 포함해서 반환
     return {
         "doc": doc,
         "meta": meta,
@@ -1154,6 +1267,7 @@ def run_workflow(user_input: str, dept: str, officer: str):
         "task_type": task_type,
         "model_usage": model_usage,
         "timing": timing,
+        "provenance": provenance,  # ✅ 중요
     }
 
 
@@ -1166,11 +1280,13 @@ def _cached_db_usage(days: int):
         return {}, 0
     return db_service.daily_usage(days=days)
 
+
 @st.cache_data(ttl=60)
 def _cached_breakdown(days: int):
     if not db_service.is_active:
         return {}, {}, {}
     return db_service.breakdown(days=days)
+
 
 def render_dashboard():
     st.markdown("## 📊 운영 계기판")
@@ -1206,8 +1322,8 @@ def render_dashboard():
         def top_lines(d: dict, k: int = 10):
             if not d:
                 return "(데이터 없음 / 컬럼 미구성 가능)"
-            items = sorted(d.items(), key=lambda kv: -kv[1])[:k]
-            return "\n".join([f"- {name}: {cnt}건" for name, cnt in items])
+            items2 = sorted(d.items(), key=lambda kv: -kv[1])[:k]
+            return "\n".join([f"- {name}: {cnt}건" for name, cnt in items2])
 
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -1254,7 +1370,6 @@ def render_dashboard():
 def main():
     metrics_init()
 
-    # 세션 기본값
     st.session_state.setdefault("dept", "충주시청 ○○과")
     st.session_state.setdefault("officer", "○○○")
 
@@ -1287,7 +1402,7 @@ def main():
         st.markdown("### ⚙️ 상태")
         st.write(f"- LAW API: {'ON' if law_api.enabled else 'OFF'}")
         st.write(f"- Naver 검색: {'ON' if naver_search.enabled else 'OFF'}")
-        st.write(f"- Groq 70B: {'ON' if bool(st.secrets.get('general', {}).get('GROQ_API_KEY')) else 'OFF'}")
+        st.write(f"- Groq 70B: {'ON' if bool(getattr(llm_service, 'groq_key', None)) else 'OFF'}")
         st.write(f"- DB(Supabase): {'ON' if db_service.is_active else 'OFF'}")
 
         if run_btn:
@@ -1296,7 +1411,11 @@ def main():
             else:
                 try:
                     with st.spinner("TGD 에이전트 처리 중..."):
-                        out = run_workflow(user_input, dept=st.session_state["dept"], officer=st.session_state["officer"])
+                        out = run_workflow(
+                            user_input,
+                            dept=st.session_state["dept"],
+                            officer=st.session_state["officer"],
+                        )
                         st.session_state["final"] = out
                 except Exception as e:
                     st.error(f"시스템 오류 발생: {e}")
@@ -1316,68 +1435,64 @@ def main():
                 """,
                 unsafe_allow_html=True,
             )
-        else: # <--- 여기서부터 들여쓰기가 중요합니다.
-            # 데이터 추출
-            doc = ensure_doc_shape(final["doc"])
-            meta = final["meta"]
-            legal_basis = final["legal_basis"]
-            legal_status = final["legal_status"]
-            law_debug = final.get("law_debug", {})
+        else:
+            doc = ensure_doc_shape(final.get("doc", {}))
+            meta = final.get("meta", {})
+            legal_basis = final.get("legal_basis", "")
+            legal_status = final.get("legal_status", "PENDING")
+            law_debug = final.get("law_debug", {}) or {}
             strategy = final.get("strategy", "")
-            evidence_text = final.get("evidence_text", "")
-            evsum = final.get("evidence_summary", {})
             task_type = final.get("task_type", "(미분류)")
 
-            # 탭 생성
             tab1, tab2, tab3 = st.tabs(["📄 공문서 프리뷰", "🔍 법리/증거 분석", "🧩 조문 후보/디버그"])
 
             with tab1:
                 html_content = f"""
-                <!doctype html>
-                <html>
-                <head>
-                <meta charset="utf-8">
-                <style>
-                  body {{ margin:0; padding:0; background:#f3f4f6; }}
-                  .paper-sheet {{
-                    background:#fff; max-width:210mm; min-height:297mm; padding:25mm; margin:0 auto;
-                    font-family: 'Noto Serif KR','Noto Sans KR','Nanum Gothic','Apple SD Gothic Neo','Malgun Gothic',serif;
-                    color:#111; line-height:1.7; position:relative;
-                  }}
-                  .doc-header {{ text-align:center; font-size:22pt; font-weight:900; margin-bottom:30px; letter-spacing:2px; }}
-                  .doc-info {{
-                    display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
-                    font-size:11pt; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:20px;
-                  }}
-                  .doc-body {{ font-size:12pt; }}
-                  .doc-footer {{ text-align:center; font-size:20pt; font-weight:bold; margin-top:80px; letter-spacing:5px; }}
-                  .stamp {{
-                    position:absolute; bottom:85px; right:80px; border:3px solid #c00; color:#c00;
-                    padding:5px 10px; font-size:14pt; font-weight:bold; transform:rotate(-15deg); opacity:0.85; border-radius:5px;
-                  }}
-                  p {{ margin: 0 0 15px 0; }}
-                </style>
-                </head>
-                <body>
-                  <div class="paper-sheet">
-                    <div class="stamp">직인생략</div>
-                    <div class="doc-header">{safe_html(doc.get("title"))}</div>
-                    <div class="doc-info">
-                      <span>문서번호: {safe_html(meta.get("doc_num"))}</span>
-                      <span>시행일자: {safe_html(meta.get("today_str"))}</span>
-                      <span>수신: {safe_html(doc.get("receiver"))}</span>
-                    </div>
-                    <div class="doc-body">
-                """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {{ margin:0; padding:0; background:#f3f4f6; }}
+  .paper-sheet {{
+    background:#fff; max-width:210mm; min-height:297mm; padding:25mm; margin:0 auto;
+    font-family: 'Noto Serif KR','Noto Sans KR','Nanum Gothic','Apple SD Gothic Neo','Malgun Gothic',serif;
+    color:#111; line-height:1.7; position:relative;
+  }}
+  .doc-header {{ text-align:center; font-size:22pt; font-weight:900; margin-bottom:30px; letter-spacing:2px; }}
+  .doc-info {{
+    display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+    font-size:11pt; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:20px;
+  }}
+  .doc-body {{ font-size:12pt; }}
+  .doc-footer {{ text-align:center; font-size:20pt; font-weight:bold; margin-top:80px; letter-spacing:5px; }}
+  .stamp {{
+    position:absolute; bottom:85px; right:80px; border:3px solid #c00; color:#c00;
+    padding:5px 10px; font-size:14pt; font-weight:bold; transform:rotate(-15deg); opacity:0.85; border-radius:5px;
+  }}
+  p {{ margin: 0 0 15px 0; }}
+</style>
+</head>
+<body>
+  <div class="paper-sheet">
+    <div class="stamp">직인생략</div>
+    <div class="doc-header">{safe_html(doc.get("title"))}</div>
+    <div class="doc-info">
+      <span>문서번호: {safe_html(meta.get("doc_num"))}</span>
+      <span>시행일자: {safe_html(meta.get("today_str"))}</span>
+      <span>수신: {safe_html(doc.get("receiver"))}</span>
+    </div>
+    <div class="doc-body">
+"""
                 for p in doc.get("body_paragraphs", []):
                     html_content += f"<p>{safe_html(p)}</p>\n"
                 html_content += f"""
-                    </div>
-                    <div class="doc-footer">{safe_html(doc.get("department_head"))}</div>
-                  </div>
-                </body>
-                </html>
-                """
+    </div>
+    <div class="doc-footer">{safe_html(doc.get("department_head"))}</div>
+  </div>
+</body>
+</html>
+"""
                 components.html(html_content, height=1100, scrolling=True)
                 st.download_button(
                     label="🖨️ 다운로드 (HTML)",
@@ -1395,32 +1510,34 @@ def main():
 
                 st.markdown("---")
                 st.subheader("🧾 네이버 검색 근거 (클릭 시 원문 이동)")
-                
-                evidence_items = final.get("provenance", {}).get("evidence_items", [])
-                
+
+                evidence_items = (final.get("provenance", {}) or {}).get("evidence_items", [])
+
                 if not evidence_items:
                     st.info("수집된 네이버 검색 근거가 없습니다.")
                 else:
                     for it in evidence_items:
                         lvl = it.get("quality_level", "LOW")
                         color = "#1e40af" if lvl == "HIGH" else "#c2410c" if lvl == "MED" else "#6b7280"
-                        
-                        st.markdown(f"""
-                        <div style="border-left: 5px solid {color}; padding: 10px 15px; margin-bottom: 15px; background-color: white; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                            <div style="font-size: 0.8rem; color: {color}; font-weight: bold; margin-bottom: 5px;">
-                                [{lvl} / {it.get('quality_score')}] {it.get('source')}
-                            </div>
-                            <a href="{it.get('link')}" target="_blank" style="text-decoration: none; color: #1e3a8a; font-size: 1.1rem; font-weight: bold;">
-                                {it.get('title')} <span style="font-size: 0.9rem;">🔗</span>
-                            </a>
-                            <div style="font-size: 0.95rem; color: #374151; margin-top: 5px; line-height: 1.5;">
-                                {it.get('description')}
-                            </div>
-                            <div style="font-size: 0.8rem; color: #9ca3af; margin-top: 8px;">
-                                {it.get('pubDate')}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown(
+                            f"""
+<div style="border-left: 5px solid {color}; padding: 10px 15px; margin-bottom: 15px; background-color: white; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+  <div style="font-size: 0.8rem; color: {color}; font-weight: bold; margin-bottom: 5px;">
+    [{lvl} / {it.get('quality_score')}] {it.get('source')}
+  </div>
+  <a href="{it.get('link')}" target="_blank" style="text-decoration: none; color: #1e3a8a; font-size: 1.1rem; font-weight: bold;">
+    {it.get('title')} <span style="font-size: 0.9rem;">🔗</span>
+  </a>
+  <div style="font-size: 0.95rem; color: #374151; margin-top: 5px; line-height: 1.5;">
+    {it.get('description')}
+  </div>
+  <div style="font-size: 0.8rem; color: #9ca3af; margin-top: 8px;">
+    {it.get('pubDate')}
+  </div>
+</div>
+""",
+                            unsafe_allow_html=True,
+                        )
 
             with tab3:
                 st.subheader("🧩 조문 후보(자동탐색) → 사람 선택으로 CONFIRMED 격상")
@@ -1428,7 +1545,10 @@ def main():
                 if not auto_cands:
                     st.info("자동탐색 후보가 없습니다. (이미 CONFIRMED이거나, 키워드 매칭 실패)")
                 else:
-                    options = [f"{i+1}) {c.get('article_no','')} | 점수:{c.get('score','')} | {c.get('title','')}" for i, c in enumerate(auto_cands)]
+                    options = [
+                        f"{i+1}) {c.get('article_no','')} | 점수:{c.get('score','')} | {c.get('title','')}"
+                        for i, c in enumerate(auto_cands)
+                    ]
                     sel = st.selectbox("조문 후보 선택", options=options, index=0)
                     if st.button("✅ 선택한 조문으로 확정(CONFIRMED) 후 재작성", use_container_width=True):
                         idx = max(0, options.index(sel))
@@ -1437,8 +1557,8 @@ def main():
                             "status": "CONFIRMED",
                             "basis": f"[{law_debug.get('law_name','')} {picked.get('article_no','')}]\n\n{picked.get('fulltext','')}",
                             "picked": picked,
-                            "law_name": law_debug.get("law_name",""),
-                            "law_id": law_debug.get("law_id",""),
+                            "law_name": law_debug.get("law_name", ""),
+                            "law_id": law_debug.get("law_id", ""),
                         }
                         st.rerun()
 
@@ -1449,12 +1569,13 @@ def main():
                     st.warning("API 호출 시도 기록이 없습니다. API ID(OC) 설정을 확인하세요.")
                 else:
                     for t in traces:
-                        status_icon = "✅" if t.get('count', 0) > 0 else "❌"
+                        status_icon = "✅" if t.get("count", 0) > 0 else "❌"
                         st.write(f"{status_icon} **쿼리**: `{t.get('query')}` → **검색결과**: {t.get('count')}건")
-                        if t.get('top'):
+                        if t.get("top"):
                             st.caption(f"    └ 가장 유사한 법령: {t.get('top')}")
-                
-                st.info(f"현재 사용 중인 API Key(OC) 존재 여부: {'예' if law_api.oc else '아니오'}")
+
+                st.info(f"현재 사용 중인 API Key(OC) 존재 여부: {'예' if bool(getattr(law_api, 'oc', None)) else '아니오'}")
+
 
 if __name__ == "__main__":
     main()
