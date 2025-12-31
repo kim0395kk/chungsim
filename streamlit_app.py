@@ -1403,6 +1403,90 @@ else:
                 
                 if not evidence_items:
                     st.info("수집된 네이버 검색 근거가 없습니다.")
+else:
+            # 데이터 추출
+            doc = ensure_doc_shape(final["doc"])
+            meta = final["meta"]
+            legal_basis = final["legal_basis"]
+            legal_status = final["legal_status"]
+            law_debug = final.get("law_debug", {})
+            strategy = final.get("strategy", "")
+            evidence_text = final.get("evidence_text", "")
+            evsum = final.get("evidence_summary", {})
+            task_type = final.get("task_type", "(미분류)")
+
+            # 탭 생성
+            tab1, tab2, tab3 = st.tabs(["📄 공문서 프리뷰", "🔍 법리/증거 분석", "🧩 조문 후보/디버그"])
+
+            with tab1:
+                html_content = f"""
+                <!doctype html>
+                <html>
+                <head>
+                <meta charset="utf-8">
+                <style>
+                  body {{ margin:0; padding:0; background:#f3f4f6; }}
+                  .paper-sheet {{
+                    background:#fff; max-width:210mm; min-height:297mm; padding:25mm; margin:0 auto;
+                    font-family: 'Noto Serif KR','Noto Sans KR','Nanum Gothic','Apple SD Gothic Neo','Malgun Gothic',serif;
+                    color:#111; line-height:1.7; position:relative;
+                  }}
+                  .doc-header {{ text-align:center; font-size:22pt; font-weight:900; margin-bottom:30px; letter-spacing:2px; }}
+                  .doc-info {{
+                    display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+                    font-size:11pt; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:20px;
+                  }}
+                  .doc-body {{ font-size:12pt; }}
+                  .doc-footer {{ text-align:center; font-size:20pt; font-weight:bold; margin-top:80px; letter-spacing:5px; }}
+                  .stamp {{
+                    position:absolute; bottom:85px; right:80px; border:3px solid #c00; color:#c00;
+                    padding:5px 10px; font-size:14pt; font-weight:bold; transform:rotate(-15deg); opacity:0.85; border-radius:5px;
+                  }}
+                  p {{ margin: 0 0 15px 0; }}
+                </style>
+                </head>
+                <body>
+                  <div class="paper-sheet">
+                    <div class="stamp">직인생략</div>
+                    <div class="doc-header">{safe_html(doc.get("title"))}</div>
+                    <div class="doc-info">
+                      <span>문서번호: {safe_html(meta.get("doc_num"))}</span>
+                      <span>시행일자: {safe_html(meta.get("today_str"))}</span>
+                      <span>수신: {safe_html(doc.get("receiver"))}</span>
+                    </div>
+                    <div class="doc-body">
+                """
+                for p in doc.get("body_paragraphs", []):
+                    html_content += f"<p>{safe_html(p)}</p>\n"
+                html_content += f"""
+                    </div>
+                    <div class="doc-footer">{safe_html(doc.get("department_head"))}</div>
+                  </div>
+                </body>
+                </html>
+                """
+                components.html(html_content, height=1100, scrolling=True)
+                st.download_button(
+                    label="🖨️ 다운로드 (HTML)",
+                    data=html_content,
+                    file_name="공문서.html",
+                    mime="text/html",
+                    use_container_width=True,
+                )
+
+            with tab2:
+                st.subheader("⚖️ 법적 근거 및 처리 전략")
+                st.info(f"법령 상태: {legal_status} / 소스: {law_debug.get('source')}")
+                st.text_area("법령 원문", value=legal_basis, height=200, disabled=True)
+                st.markdown(strategy)
+
+                st.markdown("---")
+                st.subheader("🧾 네이버 검색 근거 (클릭 시 원문 이동)")
+                
+                evidence_items = final.get("provenance", {}).get("evidence_items", [])
+                
+                if not evidence_items:
+                    st.info("수집된 네이버 검색 근거가 없습니다.")
                 else:
                     for it in evidence_items:
                         lvl = it.get("quality_level", "LOW")
