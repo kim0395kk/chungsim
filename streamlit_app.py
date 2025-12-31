@@ -322,10 +322,8 @@ class LawAPIService:
     def search_law_candidates(self, query: str, display: int = 20) -> list:
         if not self.enabled or not query:
             return []
-        
-        # 검색어 정제
+        # 검색어 정제: 특수문자 제거 및 앞뒤 공백 제거
         clean_query = re.sub(r"[^가-힣a-zA-Z0-9 ]", "", query).strip()
-        
         data = self._call_xml({
             "OC": self.oc, 
             "target": "law", 
@@ -350,7 +348,7 @@ class LawAPIService:
             return []
 
     def choose_best_law(self, candidates: list, query: str) -> dict:
-        """이 부분이 에러가 났던 지점입니다. 들여쓰기를 공백 4칸으로 맞췄습니다."""
+        """들여쓰기 오류를 수정한 핵심 메서드입니다."""
         q = norm_space(query).replace(" ", "")
         if not candidates:
             return {}
@@ -396,8 +394,9 @@ class LawAPIService:
             p_texts = []
             for p in paragraphs:
                 if not isinstance(p, dict): continue
+                # API 응답 구조에 따라 항번호 추출
                 pno = clean_text(p.get("@항번호", "")) or clean_text(p.get("ParagraphNo", ""))
-                ptxt = clean_text(p.get("ParagraphContent", ""))
+                ptxt = clean_text(p.get("ParagraphContent", "")) or clean_text(p.get("content", ""))
                 if not ptxt: continue
                 prefix = (to_circled(pno) + " ") if pno else ""
                 p_texts.append(f"{prefix}{ptxt}")
@@ -451,7 +450,6 @@ class LawAPIService:
         return scored[:topk]
 
 law_api = LawAPIService()
-
 
 
 # =========================
