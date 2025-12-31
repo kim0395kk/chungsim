@@ -1,5 +1,3 @@
-# app.py  (AI Bureau: Legal Glass - TGD Ops-Final v3)  ✅ FULL SET
-
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -9,6 +7,8 @@ import time
 from datetime import datetime, timedelta
 from html import escape, unescape
 from urllib.parse import urlparse
+
+from groq import Groq
 
 # =========================
 # Optional imports (안죽게)
@@ -27,11 +27,6 @@ try:
     from supabase import create_client
 except Exception:
     create_client = None
-
-try:
-    from groq import Groq
-except Exception:
-    Groq = None
 
 
 # =========================
@@ -142,7 +137,12 @@ def ensure_doc_shape(doc):
     if cleaned2:
         cleaned = cleaned2
 
-    return {"title": title, "receiver": receiver, "body_paragraphs": cleaned, "department_head": head}
+    return {
+        "title": title,
+        "receiver": receiver,
+        "body_paragraphs": cleaned,
+        "department_head": head,
+    }
 
 
 # =========================
@@ -152,12 +152,6 @@ MODEL_PRICES_PER_1M = {
     "Groq / llama-3.3-70b-versatile": 0.0,
     "LLM FAILED": 0.0,
 }
-
-
-def estimate_tokens(text: str) -> int:
-    if not text:
-        return 0
-    return max(1, int(len(text) / 3.5))
 
 
 def metrics_init():
@@ -171,10 +165,14 @@ def metrics_init():
         }
 
 
-def metrics_add(model_name: str, prompt: str, output: str):
-    if "metrics" not in st.session_state:
-        metrics_init()
+def estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, int(len(text) / 3.5))
 
+
+def metrics_add(model_name: str, prompt: str, output: str):
+    metrics_init()
     m = st.session_state["metrics"]
     m["calls"][model_name] = m["calls"].get(model_name, 0) + 1
     t = estimate_tokens(prompt) + estimate_tokens(output)
@@ -187,12 +185,6 @@ def metrics_add(model_name: str, prompt: str, output: str):
 # 3) JSON Parsing (강화)
 # =========================
 def parse_first_json_object(text: str) -> dict:
-    """
-    LLM이 JSON 앞뒤에 문구를 붙이는 상황을 최대한 안전하게 파싱.
-    - 1) ``` 제거
-    - 2) 가장 바깥 { ... } 범위를 find/rfind로 잡아 시도
-    - 3) 실패 시 JSONDecoder.raw_decode로 스캔
-    """
     if not text:
         return {}
 
@@ -208,7 +200,7 @@ def parse_first_json_object(text: str) -> dict:
     except Exception:
         pass
 
-    # 2) raw_decode 스캔 (중간에 JSON이 있어도 찾음)
+    # 2) raw_decode 스캔
     try:
         dec = json.JSONDecoder()
         for i in range(len(raw)):
@@ -223,17 +215,13 @@ def parse_first_json_object(text: str) -> dict:
 
 
 # =========================
-# 4) LLM Service (70B 고정)
+# 4) LLM Service (Groq 70B)
 # =========================
 class LLMService:
     def __init__(self):
-        try:
-            self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
-        except Exception:
-            self.groq_key = None
-
+        self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
         self.last_model_used = "N/A"
-        self.groq_client = Groq(api_key=self.groq_key) if (Groq and self.groq_key) else None
+        self.groq_client = Groq(api_key=self.groq_key) if self.groq_key else None
 
     def generate_text(self, prompt: str, temperature: float = 0.1) -> str:
         last_err = None
@@ -256,7 +244,9 @@ class LLMService:
         return f"시스템 오류: AI 모델 연결 실패 ({last_err})"
 
     def generate_json(self, prompt: str) -> dict:
-        raw = self.generate_text(prompt + "\n\n[IMPORTANT] Output ONLY valid JSON. No markdown. No code fences.")
+        raw = self.generate_text(
+            prompt + "\n\n[IMPORTANT] Output ONLY valid JSON. No markdown. No code fences."
+        )
         obj = parse_first_json_object(raw)
         return obj if isinstance(obj, dict) else {}
 
@@ -308,13 +298,8 @@ def to_circled(n: str) -> str:
 
 
 def make_law_query_candidates(law_name: str, keywords: list) -> list:
-    """
-    ✅ suffix 중복 방지 강화:
-    - '법/령/규칙'으로 끝나면 추가 suffix 붙이지 않음
-    """
     law_name = norm_space(law_name)
     keywords = keywords if isinstance(keywords, list) else []
-
     suffixes = ["법", "령", "규칙"]
 
     cands = []
@@ -341,7 +326,7 @@ def make_law_query_candidates(law_name: str, keywords: list) -> list:
 
 
 # =========================
-# 5) LAW API Service (enabled 2중 안전)
+# 5) LAW API Service
 # =========================
 class LawAPIService:
     def __init__(self):
@@ -349,8 +334,8 @@ class LawAPIService:
         self.oc = None
         self.base_url = "https://www.law.go.kr/DRF/lawService.do"
         try:
-            self.oc = st.secrets["law"]["LAW_API_ID"]
-            self.base_url = st.secrets["law"].get("BASE_URL", self.base_url)
+            self.oc = st.secrets.get("law", {}).get("LAW_API_ID")
+            self.base_url = st.secrets.get("law", {}).get("BASE_URL", self.base_url)
             self.enabled = (requests is not None) and (xmltodict is not None) and bool(self.oc)
         except Exception:
             self.enabled = False
@@ -532,15 +517,12 @@ law_api = LawAPIService()
 
 
 # =========================
-# 6) Naver Search + Evidence Risk Tagging (enabled 2중 안전)
+# 6) Naver Search + Evidence Risk Tagging
 # =========================
 class NaverSearchService:
     def __init__(self):
-        try:
-            self.client_id = st.secrets.get("naver", {}).get("CLIENT_ID")
-            self.client_secret = st.secrets.get("naver", {}).get("CLIENT_SECRET")
-        except Exception:
-            self.client_id, self.client_secret = None, None
+        self.client_id = st.secrets.get("naver", {}).get("CLIENT_ID")
+        self.client_secret = st.secrets.get("naver", {}).get("CLIENT_SECRET")
         self.enabled = bool(self.client_id and self.client_secret and requests is not None)
 
     def _req(self, endpoint: str, params: dict):
@@ -563,6 +545,7 @@ class NaverSearchService:
             category = "news"
         if category != "news" and sort == "date":
             sort = "sim"
+
         params = {"query": query, "display": max(1, min(int(display), 10)), "sort": sort}
         try:
             data = self._req(category, params)
@@ -726,7 +709,7 @@ def evidence_quality_summary(evidence: list) -> dict:
 
 
 # =========================
-# 7) Supabase (스키마 불일치 자동 축소 저장)
+# 7) Supabase
 # =========================
 class DatabaseService:
     def __init__(self):
@@ -735,10 +718,11 @@ class DatabaseService:
         if create_client is None:
             return
         try:
-            self.url = st.secrets["supabase"]["SUPABASE_URL"]
-            self.key = st.secrets["supabase"]["SUPABASE_KEY"]
-            self.client = create_client(self.url, self.key)
-            self.is_active = True
+            self.url = st.secrets.get("supabase", {}).get("SUPABASE_URL")
+            self.key = st.secrets.get("supabase", {}).get("SUPABASE_KEY")
+            if self.url and self.key:
+                self.client = create_client(self.url, self.key)
+                self.is_active = True
         except Exception:
             self.is_active = False
 
@@ -755,8 +739,8 @@ class DatabaseService:
         try:
             self._attempt_insert(base)
             return "DB 저장 성공"
-        except Exception as e1:
-            _msg = str(e1)
+        except Exception:
+            pass
 
         shrink_order = [
             "evidence_quality",
@@ -948,7 +932,8 @@ JSON ONLY:
 """
         try:
             res = llm_service.generate_text(prompt, temperature=0.1)
-            days = int(re.sub(r"[^0-9]", "", res)) if res else default_days
+            days_str = re.sub(r"[^0-9]", "", res or "")
+            days = int(days_str) if days_str else default_days
             if days <= 0:
                 days = default_days
         except Exception:
@@ -1004,14 +989,14 @@ JSON ONLY:
 
 
 # =========================
-# 9) Workflow (Law Resolver + Evidence)
+# 9) Workflow
 # =========================
 def resolve_law_with_status(law_hint: dict) -> dict:
     if not law_api.enabled:
         return {
             "legal_status": "PENDING",
             "legal_basis": "⚠️ LAW API OFF (requests/xmltodict/secrets 확인 필요)",
-            "law_debug": {"source": "LAW_API_OFF"},
+            "law_debug": {"source": "LAW_API_OFF", "auto_candidates": [], "traces": []},
         }
 
     law_name = law_hint.get("law_name", "")
@@ -1041,13 +1026,15 @@ def resolve_law_with_status(law_hint: dict) -> dict:
         return {
             "legal_status": "PENDING",
             "legal_basis": "⚠️ LAW API에서 법령을 찾지 못했습니다. (법령명/키워드 보강 필요)",
-            "law_debug": {"source": "LAW_API_NO_LAW", "queries": queries, "traces": traces},
+            "law_debug": {"source": "LAW_API_NO_LAW", "queries": queries, "traces": traces, "auto_candidates": []},
         }
 
     law_xml = law_api.get_law_xml(best_law["law_id"])
 
+    # 1) 조문번호 직접
     article_text = law_api.extract_article_text(law_xml, article_no) if article_no else ""
 
+    # 2) 실패 시 키워드 자동탐색
     auto_candidates = []
     chosen_auto = None
     if not article_text:
@@ -1057,6 +1044,7 @@ def resolve_law_with_status(law_hint: dict) -> dict:
             article_text = chosen_auto.get("fulltext", "")
             article_no = chosen_auto.get("article_no", "") or article_no
 
+    # 3) 상태 결정
     if article_text and chosen_auto is None and article_no:
         return {
             "legal_status": "CONFIRMED",
@@ -1164,7 +1152,7 @@ def run_workflow(user_input: str, dept: str, officer: str):
         style = style if style in ["legal", "search", "strat", "calc", "draft", "sys"] else "sys"
         logs.append(f"<div class='agent-log log-{style}'>{escape(msg)}</div>")
         log_placeholder.markdown("".join(logs), unsafe_allow_html=True)
-        time.sleep(0.05)
+        time.sleep(0.03)
 
     def tick():
         return time.perf_counter()
@@ -1183,9 +1171,9 @@ def run_workflow(user_input: str, dept: str, officer: str):
     law_res = resolve_law_with_status(plan.get("law_hint", {}))
     timing["LawResolver(ms)"] = int((tick() - t0) * 1000)
 
-    legal_status = law_res.get("legal_status", "PENDING")
-    legal_basis = law_res.get("legal_basis", "")
-    law_debug = law_res.get("law_debug", {})
+    legal_status = law_res["legal_status"]
+    legal_basis = law_res["legal_basis"]
+    law_debug = law_res["law_debug"] or {}
     provenance["law_debug"] = law_debug
     add_log(f"✅ 법령 상태: {legal_status} / 소스: {law_debug.get('source')}", "legal")
 
@@ -1202,7 +1190,7 @@ def run_workflow(user_input: str, dept: str, officer: str):
     provenance["evidence_summary"] = evidence_summary
     provenance["evidence_raw_counts"] = ev.get("raw_counts", {})
 
-    # ✅ 사용자 선택 조문 오버라이드 반영
+    # 사용자 선택으로 법령 덮어쓰기
     if st.session_state.get("override_legal"):
         ov = st.session_state["override_legal"]
         legal_status = ov.get("status", legal_status)
@@ -1247,14 +1235,14 @@ def run_workflow(user_input: str, dept: str, officer: str):
     timing["SupabaseSave(ms)"] = int((tick() - t0) * 1000)
 
     add_log(f"✅ 완료 ({save_result})", "sys")
-    time.sleep(0.1)
+    time.sleep(0.05)
     log_placeholder.empty()
 
+    metrics_init()
     m = st.session_state["metrics"]
     m["runs"] += 1
     m["timing"].append(timing)
 
-    # ✅ UI 탭2가 읽을 수 있게 provenance 포함해서 반환
     return {
         "doc": doc,
         "meta": meta,
@@ -1267,7 +1255,7 @@ def run_workflow(user_input: str, dept: str, officer: str):
         "task_type": task_type,
         "model_usage": model_usage,
         "timing": timing,
-        "provenance": provenance,  # ✅ 중요
+        "provenance": provenance,  # ✅ 탭2에서 evidence_items 읽기 위해 반드시 포함
     }
 
 
@@ -1289,6 +1277,7 @@ def _cached_breakdown(days: int):
 
 
 def render_dashboard():
+    metrics_init()
     st.markdown("## 📊 운영 계기판")
 
     st.markdown("### 🗓️ 일일 사용량 (Supabase 기준)")
@@ -1335,7 +1324,7 @@ def render_dashboard():
 
     st.markdown("---")
 
-    m = st.session_state["metrics"]
+    m = st.session_state.get("metrics", {})
     calls = m.get("calls", {})
     tokens = m.get("tokens_est", {})
     cost = m.get("cost_est", {})
@@ -1377,7 +1366,7 @@ def main():
 
     with col_left:
         st.title("⚖️ AI 행정관 Pro (TGD Ops-Final v3)")
-        st.caption("LAW API + Naver(근거 품질/리스크 태그) + Groq 70B + Supabase(사용량/분해) + JSON 파싱 강화 + Tabs UI")
+        st.caption("LAW API + Naver(근거 품질/리스크 태그) + Groq 70B + Supabase + JSON 파싱 강화 + Tabs UI")
         st.markdown("---")
 
         with st.expander("🧩 운영 메타(저장/집계용)", expanded=True):
@@ -1428,11 +1417,11 @@ def main():
         if not final:
             st.markdown(
                 """
-                <div style='text-align: center; padding: 100px; color: #aaa; background: white; border-radius: 10px; border: 2px dashed #ddd;'>
-                  <h3>📄 Document Preview</h3>
-                  <p>왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.</p>
-                </div>
-                """,
+<div style='text-align: center; padding: 100px; color: #aaa; background: white; border-radius: 10px; border: 2px dashed #ddd;'>
+  <h3>📄 Document Preview</h3>
+  <p>왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.</p>
+</div>
+""",
                 unsafe_allow_html=True,
             )
         else:
@@ -1444,14 +1433,10 @@ def main():
             strategy = final.get("strategy", "")
             task_type = final.get("task_type", "(미분류)")
 
-                        tab1, tab2, tab3 = st.tabs(["📄 공문서 프리뷰", "🔍 법리/증거 분석", "🧩 조문 후보/디버그"])
+            tab1, tab2, tab3 = st.tabs(["📄 공문서 프리뷰", "🔍 법리/증거 분석", "🧩 조문 후보/디버그"])
 
-            # -------------------------
-            # TAB 1
-            # -------------------------
             with tab1:
-                html_content = f"""
-<!doctype html>
+                html_content = f"""<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -1498,7 +1483,6 @@ def main():
 </html>
 """
                 components.html(html_content, height=1100, scrolling=True)
-
                 st.download_button(
                     label="🖨️ 다운로드 (HTML)",
                     data=html_content,
@@ -1507,34 +1491,22 @@ def main():
                     use_container_width=True,
                 )
 
-            # -------------------------
-            # TAB 2
-            # -------------------------
             with tab2:
                 st.subheader("⚖️ 법적 근거 및 처리 전략")
                 st.info(f"법령 상태: {legal_status} / 소스: {law_debug.get('source')}")
-
                 st.text_area("법령 원문", value=legal_basis, height=200, disabled=True)
                 st.markdown(strategy)
 
                 st.markdown("---")
                 st.subheader("🧾 네이버 검색 근거 (클릭 시 원문 이동)")
 
-                provenance = final.get("provenance", {}) if isinstance(final.get("provenance", {}), dict) else {}
-                evidence_items = provenance.get("evidence_items", [])
-
+                evidence_items = (final.get("provenance", {}) or {}).get("evidence_items", [])
                 if not evidence_items:
                     st.info("수집된 네이버 검색 근거가 없습니다.")
                 else:
                     for it in evidence_items:
                         lvl = it.get("quality_level", "LOW")
-                        if lvl == "HIGH":
-                            color = "#1e40af"
-                        elif lvl == "MED":
-                            color = "#c2410c"
-                        else:
-                            color = "#6b7280"
-
+                        color = "#1e40af" if lvl == "HIGH" else "#c2410c" if lvl == "MED" else "#6b7280"
                         st.markdown(
                             f"""
 <div style="border-left: 5px solid {color}; padding: 10px 15px; margin-bottom: 15px; background-color: white; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
@@ -1555,12 +1527,8 @@ def main():
                             unsafe_allow_html=True,
                         )
 
-            # -------------------------
-            # TAB 3
-            # -------------------------
             with tab3:
                 st.subheader("🧩 조문 후보(자동탐색) → 사람 선택으로 CONFIRMED 격상")
-
                 auto_cands = law_debug.get("auto_candidates", [])
                 if not isinstance(auto_cands, list):
                     auto_cands = []
@@ -1568,18 +1536,15 @@ def main():
                 if not auto_cands:
                     st.info("자동탐색 후보가 없습니다. (이미 CONFIRMED이거나, 키워드 매칭 실패)")
                 else:
-                    options = []
-                    for i, c in enumerate(auto_cands):
-                        options.append(
-                            f"{i+1}) {c.get('article_no','')} | 점수:{c.get('score','')} | {c.get('title','')}"
-                        )
-
+                    options = [
+                        f"{i+1}) {c.get('article_no','')} | 점수:{c.get('score','')} | {c.get('title','')}"
+                        for i, c in enumerate(auto_cands)
+                    ]
                     sel = st.selectbox("조문 후보 선택", options=options, index=0)
 
                     if st.button("✅ 선택한 조문으로 확정(CONFIRMED) 후 재작성", use_container_width=True):
                         idx = max(0, options.index(sel))
                         picked = auto_cands[idx]
-
                         st.session_state["override_legal"] = {
                             "status": "CONFIRMED",
                             "basis": f"[{law_debug.get('law_name','')} {picked.get('article_no','')}]\n\n{picked.get('fulltext','')}",
@@ -1591,15 +1556,13 @@ def main():
 
                 st.markdown("---")
                 st.subheader("🔧 LAW API 디버깅 정보")
-
                 traces = law_debug.get("traces", [])
-                if not isinstance(traces, list) or not traces:
+                if not traces:
                     st.warning("API 호출 시도 기록이 없습니다. API ID(OC) 설정을 확인하세요.")
                 else:
                     for t in traces:
-                        cnt = int(t.get("count", 0) or 0)
-                        status_icon = "✅" if cnt > 0 else "❌"
-                        st.write(f"{status_icon} **쿼리**: `{t.get('query')}` → **검색결과**: {cnt}건")
+                        status_icon = "✅" if t.get("count", 0) > 0 else "❌"
+                        st.write(f"{status_icon} **쿼리**: `{t.get('query')}` → **검색결과**: {t.get('count')}건")
                         if t.get("top"):
                             st.caption(f"    └ 가장 유사한 법령: {t.get('top')}")
 
