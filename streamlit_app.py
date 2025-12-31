@@ -321,13 +321,13 @@ class LawAPIService:
             return x
         return [x]
 
-def search_law_candidates(self, query: str, display: int = 20) -> list:
+# LawAPIService 클래스 내부 메서드들입니다. 들여쓰기 깊이를 확인하세요.
+
+    def search_law_candidates(self, query: str, display: int = 20) -> list:
         if not self.enabled or not query:
             return []
-        
-        # 검색어 정제: 특수문자 제거 및 앞뒤 공백 제거
+        # 검색어 정제: 특수문자 제거
         clean_query = re.sub(r"[^가-힣a-zA-Z0-9 ]", "", query).strip()
-        
         data = self._call_xml({
             "OC": self.oc, 
             "target": "law", 
@@ -335,22 +335,12 @@ def search_law_candidates(self, query: str, display: int = 20) -> list:
             "query": clean_query, 
             "display": max(1, min(display, 50)),
         })
-        
         try:
-            # API 응답 구조 디버깅을 위해 로그 출력 (로컬 터미널 확인용)
-            # print(f"DEBUG: LAW API Query: {clean_query}")
-            
-            search_res = data.get("LawSearch", {})
-            law = search_res.get("law")
-            
+            law = data.get("LawSearch", {}).get("law")
             if not law:
-                # 결과가 없을 경우 '전체 건수' 확인
-                total = search_res.get("totalCount", "0")
                 return []
-            
             if isinstance(law, dict):
                 law = [law]
-            
             out = []
             for item in law:
                 if not isinstance(item, dict): continue
@@ -360,11 +350,11 @@ def search_law_candidates(self, query: str, display: int = 20) -> list:
                     "law_type": item.get("lawType", ""),
                 })
             return out
-        except Exception as e:
-            # st.error(f"API 파싱 오류: {e}")
+        except Exception:
             return []
 
     def choose_best_law(self, candidates: list, query: str) -> dict:
+        """들여쓰기 오류 수정본"""
         q = norm_space(query).replace(" ", "")
         if not candidates:
             return {}
@@ -384,6 +374,7 @@ def search_law_candidates(self, query: str, display: int = 20) -> list:
             s -= max(0, len(name) - 12) * 0.2
             return s
 
+        # 점수가 가장 높은 후보 반환
         best = sorted(candidates, key=score, reverse=True)[0]
         return best if best.get("law_id") else {}
 
