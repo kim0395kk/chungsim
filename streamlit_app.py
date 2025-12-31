@@ -315,19 +315,17 @@ class LawAPIService:
         return xmltodict.parse(r.text)
 
     def _as_list(self, x):
-        if x is None:
-            return []
-        if isinstance(x, list):
-            return x
+        if x is None: return []
+        if isinstance(x, list): return x
         return [x]
-
-# LawAPIService 클래스 내부 메서드들입니다. 들여쓰기 깊이를 확인하세요.
 
     def search_law_candidates(self, query: str, display: int = 20) -> list:
         if not self.enabled or not query:
             return []
-        # 검색어 정제: 특수문자 제거
+        
+        # 검색어 정제
         clean_query = re.sub(r"[^가-힣a-zA-Z0-9 ]", "", query).strip()
+        
         data = self._call_xml({
             "OC": self.oc, 
             "target": "law", 
@@ -337,10 +335,8 @@ class LawAPIService:
         })
         try:
             law = data.get("LawSearch", {}).get("law")
-            if not law:
-                return []
-            if isinstance(law, dict):
-                law = [law]
+            if not law: return []
+            if isinstance(law, dict): law = [law]
             out = []
             for item in law:
                 if not isinstance(item, dict): continue
@@ -354,7 +350,7 @@ class LawAPIService:
             return []
 
     def choose_best_law(self, candidates: list, query: str) -> dict:
-        """들여쓰기 오류 수정본"""
+        """이 부분이 에러가 났던 지점입니다. 들여쓰기를 공백 4칸으로 맞췄습니다."""
         q = norm_space(query).replace(" ", "")
         if not candidates:
             return {}
@@ -363,26 +359,19 @@ class LawAPIService:
             name = norm_space(item.get("law_name", ""))
             n2 = name.replace(" ", "")
             s = 0
-            if not name:
-                return -999
-            if q and q in n2:
-                s += 50
-            if "시행령" in name:
-                s -= 2
-            if "시행규칙" in name:
-                s -= 2
+            if not name: return -999
+            if q and q in n2: s += 50
+            if "시행령" in name: s -= 2
+            if "시행규칙" in name: s -= 2
             s -= max(0, len(name) - 12) * 0.2
             return s
 
-        # 점수가 가장 높은 후보 반환
         best = sorted(candidates, key=score, reverse=True)[0]
         return best if best.get("law_id") else {}
 
     def get_law_xml(self, law_id: str) -> dict:
-        if not self.enabled or not law_id:
-            return {}
-        if law_id in self._law_xml_cache:
-            return self._law_xml_cache[law_id]
+        if not self.enabled or not law_id: return {}
+        if law_id in self._law_xml_cache: return self._law_xml_cache[law_id]
         data = self._call_xml({"OC": self.oc, "target": "law", "type": "XML", "ID": law_id})
         self._law_xml_cache[law_id] = data
         return data
@@ -397,8 +386,7 @@ class LawAPIService:
                 return f"제{m.group(1)}조" if m else ""
             num = int(d[:4]) if len(d) >= 4 else int(d)
             return f"제{num}조"
-        except Exception:
-            return ""
+        except Exception: return ""
 
     def build_article_fulltext(self, art: dict) -> str:
         try:
@@ -407,90 +395,62 @@ class LawAPIService:
             paragraphs = self._as_list(art.get("Paragraph"))
             p_texts = []
             for p in paragraphs:
-                if not isinstance(p, dict):
-                    continue
-                pno = (
-                    clean_text(p.get("ParagraphNumber", "")) or
-                    clean_text(p.get("@항번호", "")) or
-                    clean_text(p.get("ParagraphNo", "")) or
-                    clean_text(p.get("@번호", ""))
-                )
-                ptxt = clean_text(p.get("ParagraphContent", "")) or clean_text(p.get("content", ""))
-                if not ptxt:
-                    continue
+                if not isinstance(p, dict): continue
+                pno = clean_text(p.get("@항번호", "")) or clean_text(p.get("ParagraphNo", ""))
+                ptxt = clean_text(p.get("ParagraphContent", ""))
+                if not ptxt: continue
                 prefix = (to_circled(pno) + " ") if pno else ""
                 p_texts.append(f"{prefix}{ptxt}")
-
             joined = "\n".join([x for x in [title, content, "\n".join(p_texts)] if x])
             return clean_text(joined)
-        except Exception:
-            return ""
+        except Exception: return ""
 
     def extract_article_text(self, law_xml: dict, article_no: str) -> str:
-        if not self.enabled or not law_xml or not article_no:
-            return ""
+        if not self.enabled or not law_xml or not article_no: return ""
         try:
             target_num = only_digits(article_no)
-            if not target_num:
-                return ""
+            if not target_num: return ""
             articles = self._as_list(law_xml.get("Law", {}).get("Article", []))
             for art in articles:
-                if not isinstance(art, dict):
-                    continue
+                if not isinstance(art, dict): continue
                 curr_art_no = clean_text(art.get("@조문번호", ""))
                 title = clean_text(art.get("ArticleTitle") or art.get("title") or "")
                 title_hit = (target_num in only_digits(title)) or (target_num in title)
                 no_hit = (target_num in curr_art_no)
                 if title_hit or no_hit:
-                    fulltext = self.build_article_fulltext(art)
-                    if fulltext:
-                        return fulltext
-        except Exception:
-            pass
+                    return self.build_article_fulltext(art)
+        except Exception: pass
         return ""
 
     def find_article_candidates(self, law_xml: dict, keywords: list, topk: int = 5) -> list:
-        if not self.enabled or not law_xml:
-            return []
+        if not self.enabled or not law_xml: return []
         keywords = [clean_text(k) for k in (keywords or []) if clean_text(k)]
-        if not keywords:
-            return []
-
+        if not keywords: return []
         articles = self._as_list(law_xml.get("Law", {}).get("Article", []))
         scored = []
-
         for art in articles:
-            if not isinstance(art, dict):
-                continue
+            if not isinstance(art, dict): continue
             title = clean_text(art.get("ArticleTitle") or art.get("title") or "")
             fulltext = self.build_article_fulltext(art)
-            if not fulltext:
-                continue
-
+            if not fulltext: continue
             text_low = fulltext.lower()
             score = 0
             for kw in keywords:
                 kw_low = kw.lower()
-                if kw_low in title.lower():
-                    score += 8
-                if kw_low in text_low:
-                    score += 3
-
-            if score <= 0:
-                continue
-
-            art_no = self._article_no_display(art)
-            excerpt = fulltext[:220] + ("…" if len(fulltext) > 220 else "")
+                if kw_low in title.lower(): score += 8
+                if kw_low in text_low: score += 3
+            if score <= 0: continue
             scored.append({
-                "article_no": art_no,
+                "article_no": self._article_no_display(art),
                 "title": title,
                 "score": score,
-                "text_excerpt": excerpt,
+                "text_excerpt": fulltext[:220] + "...",
                 "fulltext": fulltext,
             })
-
         scored.sort(key=lambda x: x["score"], reverse=True)
         return scored[:topk]
+
+law_api = LawAPIService()
 
 law_api = LawAPIService()
 
