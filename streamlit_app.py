@@ -2,14 +2,11 @@
 # Groq: qwen/qwen3-32b (FAST) + llama-3.3-70b-versatile (STRICT)
 # LAWGO(DRF) + NAVER + Supabase + Anti-crash patches
 #
-# ✅ FAST(default): Planner/Strategy
-# ✅ STRICT(fallback/critical): Drafter(JSON), Planner JSON fail, Strategy when law not confirmed
-# ✅ JSON 안정화: 재시도 + STRICT 승급
-# ✅ UI 튐 방지: HTML sanitize + components.html 버그 수정
-# ✅ Metrics: 모델별 호출 + (가능하면) total_tokens 합산
-
-import streamlit as st
-import streamlit.components.v1 as components
+# FAST(default): Planner/Strategy
+# STRICT(fallback/critical): Drafter(JSON), Planner JSON fail, Strategy when law not confirmed
+# JSON 안정화: 재시도 + STRICT 승급
+# UI 튐 방지: HTML sanitize + components.html 안정화
+# Metrics: 모델별 호출 + tokens_total 합산(가능한 경우)
 
 import json
 import re
@@ -17,27 +14,30 @@ import time
 from datetime import datetime
 from html import escape, unescape
 
+import streamlit as st
+import streamlit.components.v1 as components
+
 # =========================
 # 0) Optional Imports (Safety)
 # =========================
 try:
     from groq import Groq
-except ImportError:
+except Exception:
     Groq = None
 
 try:
     import requests
-except ImportError:
+except Exception:
     requests = None
 
 try:
     import xmltodict
-except ImportError:
+except Exception:
     xmltodict = None
 
 try:
     from supabase import create_client
-except ImportError:
+except Exception:
     create_client = None
 
 
@@ -46,7 +46,7 @@ except ImportError:
 # =========================
 st.set_page_config(
     layout="wide",
-    page_title="AI 행정관 Pro (Dual v5.0)",
+    page_title="AI 행정관 Pro (Dual v5.1)",
     page_icon="⚖️",
     initial_sidebar_state="collapsed",
 )
@@ -91,20 +91,57 @@ st.markdown(
 )
 
 _TAG_RE = re.compile(r"<[^>]+>")
+# 한자(중국/일본 한자 포함) 범위 제거용: CJK Unified + Extension A + Compatibility Ideographs
+_HANJA_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 
 
 # =========================
 # 2) Helpers
 # =========================
+def strip_bad_invisibles(s: str) -> str:
+    """
+    JSON/HTML/텍스트에 섞이는 비가시문자(제로폭, BOM, PUA 등) 제거/치환
+    - U+EA01 같은 Private Use Area(U+E000~U+F8FF)를 공백으로 치환
+    """
+    if s is None:
+        return ""
+    s = str(s)
+
+    # BOM / zero-width / NBSP / word-joiner
+    s = s.replace("\ufeff", "")
+    s = s.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "")
+    s = s.replace("\u2060", "")
+    s = s.replace("\u00a0", " ")
+
+    # Private Use Area
+    out = []
+    for ch in s:
+        o = ord(ch)
+        if 0xE000 <= o <= 0xF8FF:
+            out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def clean_text(value) -> str:
-    """HTML 태그 및 제어문자 제거"""
+    """HTML 태그, 제어문자, 비가시문자 제거"""
     if value is None:
         return ""
-    s = str(value)
-    s = unescape(s)
+    s = strip_bad_invisibles(unescape(str(value)))
     s = _TAG_RE.sub("", s)
-    s = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", s)
+    s = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", s)  # control chars
     return s.strip()
+
+
+def remove_hanja(value: str) -> str:
+    """한자 제거(‘한글로 번역’은 불가 → 안전하게 제거/정리)"""
+    s = clean_text(value)
+    if not s:
+        return ""
+    s = _HANJA_RE.sub("", s)
+    s = re.sub(r"\s{2,}", " ", s).strip()
+    return s
 
 
 def safe_html(value) -> str:
@@ -119,7 +156,7 @@ def truncate_text(s: str, max_chars: int = 2500) -> str:
 
 
 def ensure_doc_shape(doc):
-    """LLM 응답이 깨졌을 때 기본값 보장"""
+    """LLM 응답이 깨졌을 때 기본값 보장 + 한자 제거"""
     fallback = {
         "title": "문 서 (생성 실패)",
         "receiver": "수신자 참조",
@@ -135,28 +172,55 @@ def ensure_doc_shape(doc):
     if not isinstance(body, list) or not body:
         body = fallback["body_paragraphs"]
 
+    body_clean = []
+    for x in body:
+        cx = remove_hanja(x)
+        if cx:
+            body_clean.append(cx)
+    if not body_clean:
+        body_clean = fallback["body_paragraphs"]
+
     return {
-        "title": clean_text(doc.get("title") or fallback["title"]),
-        "receiver": clean_text(doc.get("receiver") or fallback["receiver"]),
-        "body_paragraphs": [clean_text(x) for x in body if clean_text(x)] or fallback["body_paragraphs"],
-        "department_head": clean_text(doc.get("department_head") or fallback["department_head"]),
+        "title": remove_hanja(doc.get("title") or fallback["title"]),
+        "receiver": remove_hanja(doc.get("receiver") or fallback["receiver"]),
+        "body_paragraphs": body_clean,
+        "department_head": remove_hanja(doc.get("department_head") or fallback["department_head"]),
     }
 
 
 def safe_json_dump(obj):
-    """Supabase 저장 시 터지지 않게 직렬화"""
+    """Supabase 저장 시 터지지 않게 직렬화 + 비가시문자 방어"""
     try:
-        return json.dumps(obj, ensure_ascii=False, default=str)
+        return json.dumps(obj, ensure_ascii=False, default=lambda x: strip_bad_invisibles(str(x)))
     except Exception:
         return "{}"
 
 
-def extract_keywords_kor(text: str, max_k: int = 6) -> list[str]:
+def extract_keywords_kor(text: str, max_k: int = 6):
     if not text:
         return []
-    t = re.sub(r"[^가-힣A-Za-z0-9\s]", " ", text)
+    t = re.sub(r"[^가-힣A-Za-z0-9\s]", " ", clean_text(text))
     words = re.findall(r"[가-힣A-Za-z0-9]{2,12}", t)
-    stop = set(["그리고", "관련", "문의", "사항", "대하여", "대한", "처리", "요청", "작성", "안내", "검토", "불편", "민원", "신청", "발급", "제출"])
+    stop = set(
+        [
+            "그리고",
+            "관련",
+            "문의",
+            "사항",
+            "대하여",
+            "대한",
+            "처리",
+            "요청",
+            "작성",
+            "안내",
+            "검토",
+            "불편",
+            "민원",
+            "신청",
+            "발급",
+            "제출",
+        ]
+    )
     out = []
     for w in words:
         if w in stop:
@@ -178,7 +242,7 @@ def metrics_init():
         st.session_state["metrics"] = {"calls": {}, "tokens_total": 0}
 
 
-def metrics_add(model_name: str, tokens_total: int | None = None):
+def metrics_add(model_name: str, tokens_total=None):
     metrics_init()
     m = st.session_state["metrics"]
     m["calls"][model_name] = m["calls"].get(model_name, 0) + 1
@@ -203,16 +267,17 @@ class LLMService:
     GROQ_MODEL_FAST = "qwen/qwen3-32b"
     GROQ_MODEL_STRICT = "llama-3.3-70b-versatile"
     """
+
     def __init__(self):
         g = st.secrets.get("general", {})
         self.groq_key = g.get("GROQ_API_KEY")
 
-        # ✅ 모델명: 사용자 스샷 기준
         self.model_fast = g.get("GROQ_MODEL_FAST", "qwen/qwen3-32b")
         self.model_strict = g.get("GROQ_MODEL_STRICT", "llama-3.3-70b-versatile")
 
         self.client = None
         self.last_model = "N/A"
+
         if Groq and self.groq_key:
             try:
                 self.client = Groq(api_key=self.groq_key)
@@ -230,7 +295,6 @@ class LLMService:
         resp = self.client.chat.completions.create(**kwargs)
         self.last_model = model
 
-        # metrics
         tokens_total = None
         try:
             usage = getattr(resp, "usage", None)
@@ -240,9 +304,12 @@ class LLMService:
             tokens_total = None
 
         metrics_add(model, tokens_total=tokens_total)
-        return resp.choices[0].message.content or ""
 
-    def _parse_json(self, text: str) -> dict:
+        txt = resp.choices[0].message.content or ""
+        return strip_bad_invisibles(txt)
+
+    def _parse_json(self, text: str):
+        text = strip_bad_invisibles(text).strip()
         try:
             return json.loads(text)
         except Exception:
@@ -261,17 +328,20 @@ class LLMService:
 
         model_first = self.model_fast if prefer == "fast" else self.model_strict
         messages = [
-            {"role": "system", "content": "Korean public administration assistant. Be practical, concise, and correct."},
-            {"role": "user", "content": prompt},
+            {
+                "role": "system",
+                "content": "Korean public administration assistant. Be practical, concise, and correct.",
+            },
+            {"role": "user", "content": strip_bad_invisibles(prompt)},
         ]
 
-        # 1) 1차
+        # 1차
         try:
             return self._chat(model_first, messages, temp, json_mode=False)
         except Exception:
             pass
 
-        # 2) fast 실패면 strict 승급
+        # fast 실패면 strict 승급
         if prefer == "fast":
             try:
                 return self._chat(self.model_strict, messages, temp, json_mode=False)
@@ -280,33 +350,33 @@ class LLMService:
 
         return "LLM Error"
 
-    def generate_json(self, prompt: str, prefer: str = "fast", temp: float = 0.1, max_retry: int = 2) -> dict:
+    def generate_json(self, prompt: str, prefer: str = "fast", temp: float = 0.1, max_retry: int = 2):
         if not self.client:
             return {}
 
         sys_json = "Output JSON only. No markdown. No explanation. Follow the schema exactly."
         messages = [
             {"role": "system", "content": sys_json},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": strip_bad_invisibles(prompt)},
         ]
 
         model_first = self.model_fast if prefer == "fast" else self.model_strict
 
-        # 1) 같은 모델 재시도
+        # 같은 모델 재시도
         for _ in range(max_retry):
             try:
                 txt = self._chat(model_first, messages, temp, json_mode=True)
                 js = self._parse_json(txt)
-                if js:
+                if isinstance(js, dict) and js:
                     return js
             except Exception:
                 pass
 
-        # 2) strict 승급
+        # strict 승급
         try:
             txt = self._chat(self.model_strict, messages, temp, json_mode=True)
             js = self._parse_json(txt)
-            return js if js else {}
+            return js if isinstance(js, dict) else {}
         except Exception:
             return {}
 
@@ -323,13 +393,20 @@ class LawAPIService:
     [law]
     LAW_API_ID = "OC값"
     """
+
     def __init__(self):
         self.oc = st.secrets.get("law", {}).get("LAW_API_ID")
         self.search_url = "https://www.law.go.kr/DRF/lawSearch.do"
         self.service_url = "https://www.law.go.kr/DRF/lawService.do"
         self.enabled = bool(requests and xmltodict and self.oc)
 
-    def search_law(self, query: str, display: int = 10) -> list[dict]:
+    def _pick(self, d: dict, keys: list[str], default=""):
+        for k in keys:
+            if k in d and d.get(k) not in (None, ""):
+                return d.get(k)
+        return default
+
+    def search_law(self, query: str, display: int = 10):
         if not self.enabled or not query:
             return []
         try:
@@ -345,24 +422,25 @@ class LawAPIService:
             r.raise_for_status()
             data = xmltodict.parse(r.text)
 
-            # LawSearch > law
-            laws = data.get("LawSearch", {}).get("law", [])
+            laws = (data.get("LawSearch", {}) or {}).get("law", []) or []
             if isinstance(laws, dict):
                 laws = [laws]
+
             out = []
             for it in laws:
                 if not isinstance(it, dict):
                     continue
-                out.append(
-                    {
-                        "lawNm": it.get("법령명한글") or it.get("lawNm") or it.get("법령명") or "",
-                        "MST": it.get("법령일련번호") or it.get("MST") or it.get("mst") or "",
-                        "lawId": it.get("법령ID") or it.get("lawId") or it.get("id") or "",
-                        "link": it.get("법령상세링크") or it.get("link") or "",
-                    }
-                )
-            # 기본 필터
-            return [x for x in out if clean_text(x.get("lawNm"))]
+
+                lawNm = self._pick(it, ["법령명한글", "lawNm", "법령명", "법령명_한글"], "")
+                MST = self._pick(it, ["법령일련번호", "MST", "mst"], "")
+                lawId = self._pick(it, ["법령ID", "lawId", "id"], "")
+                link = self._pick(it, ["법령상세링크", "link"], "")
+
+                lawNm = remove_hanja(lawNm)  # 한자 제거
+                out.append({"lawNm": lawNm, "MST": clean_text(MST), "lawId": clean_text(lawId), "link": clean_text(link)})
+
+            out = [x for x in out if clean_text(x.get("lawNm"))]
+            return out
         except Exception:
             return []
 
@@ -384,30 +462,33 @@ class LawAPIService:
             if isinstance(articles, dict):
                 articles = [articles]
 
+            # 조문번호가 없으면 너무 길게 뽑지 말고 요약용으로 일부만
             if not article_no:
-                # 특정 조문 없이도 반환(일부라도)
-                # 너무 길면 컷
-                raw = clean_text(r.text)
+                raw = remove_hanja(r.text)
                 return raw[:4000]
 
             tgt = re.sub(r"[^0-9]", "", str(article_no))
             if not tgt:
                 return ""
 
-            # 조문 찾기
             for art in articles:
                 if not isinstance(art, dict):
                     continue
+
                 an = clean_text(art.get("@조문번호") or "")
-                at = clean_text(art.get("ArticleTitle") or "")
+                at = remove_hanja(art.get("ArticleTitle") or "")
+                content = remove_hanja(art.get("ArticleContent") or "")
+
                 # 매칭
                 if tgt == re.sub(r"[^0-9]", "", an) or (tgt and f"제{tgt}조" in at):
-                    content = clean_text(art.get("ArticleContent") or "")
                     paras = art.get("Paragraph", [])
                     if isinstance(paras, dict):
                         paras = [paras]
-                    p_text = "\n".join([clean_text(p.get("ParagraphContent")) for p in paras if isinstance(p, dict)])
-                    return "\n".join([x for x in [at, content, p_text] if x]).strip()
+                    p_text = "\n".join(
+                        [remove_hanja(p.get("ParagraphContent")) for p in paras if isinstance(p, dict)]
+                    )
+                    joined = "\n".join([x for x in [at, content, p_text] if x]).strip()
+                    return joined
 
             return ""
         except Exception:
@@ -427,6 +508,7 @@ class NaverSearchService:
     CLIENT_ID="..."
     CLIENT_SECRET="..."
     """
+
     def __init__(self):
         n = st.secrets.get("naver", {})
         self.cid = n.get("CLIENT_ID")
@@ -460,6 +542,7 @@ class DatabaseService:
     SUPABASE_URL="..."
     SUPABASE_KEY="..."
     """
+
     def __init__(self):
         self.client = None
         s = st.secrets.get("supabase", {})
@@ -495,7 +578,9 @@ def run_workflow(user_input: str, dept: str, officer: str):
     def add_log(msg: str, style: str = "sys"):
         logs.append(f"<div class='agent-log log-{style}'>{safe_html(msg)}</div>")
         log_area.markdown("".join(logs), unsafe_allow_html=True)
-        time.sleep(0.05)
+        time.sleep(0.04)
+
+    user_input = remove_hanja(user_input)  # 입력에도 혹시 섞이면 정리
 
     # ---- Phase 0: cheap keyword extraction (no LLM)
     kw_fallback = extract_keywords_kor(user_input, max_k=6)
@@ -523,17 +608,17 @@ def run_workflow(user_input: str, dept: str, officer: str):
     if not plan:
         plan = {"task_type": "업무", "law_hint": {"law_name": "", "article_no": ""}, "keywords": kw_fallback[:3]}
 
-    # Plan 보정
-    task_type = clean_text(plan.get("task_type") or "업무")
+    # Plan 보정 + 한자 제거
+    task_type = remove_hanja(plan.get("task_type") or "업무")
     law_hint = plan.get("law_hint") if isinstance(plan.get("law_hint"), dict) else {}
-    law_name = clean_text(law_hint.get("law_name") or "")
+    law_name = remove_hanja(law_hint.get("law_name") or "")
     art_no = clean_text(law_hint.get("article_no") or "")
     keywords = plan.get("keywords") if isinstance(plan.get("keywords"), list) else []
-    keywords = [clean_text(x) for x in keywords if clean_text(x)]
+    keywords = [remove_hanja(x) for x in keywords if remove_hanja(x)]
     if not keywords:
         keywords = kw_fallback[:3]
 
-    # 2) Law Search (Rule-first: if law_name empty -> try keywords)
+    # 2) Law Search
     add_log("📚 [Law] 법령 검색 및 조문 확인...", "legal")
     legal_basis = "법령 정보를 찾을 수 없습니다."
     legal_status = "PENDING"
@@ -543,41 +628,45 @@ def run_workflow(user_input: str, dept: str, officer: str):
     law_queries = []
     if law_name:
         law_queries.append(law_name)
-    # fallback: keywords-based
     for k in keywords[:3]:
         if k and k not in law_queries:
             law_queries.append(k)
 
     chosen = None
+    chosen_q = None
     for q in law_queries[:4]:
         candidates = law_api.search_law(q, display=10)
         if candidates:
             chosen = candidates[0]
+            chosen_q = q
             break
 
     if chosen:
-        nm = clean_text(chosen.get("lawNm") or "")
+        nm = remove_hanja(chosen.get("lawNm") or "")
         mst = clean_text(chosen.get("MST") or "")
         link = clean_text(chosen.get("link") or "")
+
         # 조문 텍스트
         full_text = law_api.get_article_text_by_mst(mst, art_no if art_no else None)
+        full_text = remove_hanja(full_text)
+
         if full_text and len(full_text) >= 20:
-            # 대표 문구
             if art_no:
                 legal_basis = f"{nm} 제{re.sub(r'[^0-9]', '', art_no)}조\n{truncate_text(full_text, 2500)}"
             else:
                 legal_basis = f"{nm}\n{truncate_text(full_text, 2500)}"
             legal_status = "CONFIRMED"
-            law_debug = {"mst": mst, "name": nm, "link": link}
         else:
             legal_basis = f"법령({nm})은 찾았으나 조문 원문 확보 실패."
             legal_status = "WEAK"
-            law_debug = {"mst": mst, "name": nm, "link": link}
+
+        law_debug = {"mst": mst, "name": nm, "link": link, "query_used": chosen_q or ""}
     else:
         legal_basis = "관련 법령 검색 실패(후보 없음)."
         legal_status = "FAIL"
+        law_debug = {"query_used": law_queries[:4]}
 
-    # 3) Naver Evidence (fast, no LLM)
+    # 3) Naver Evidence
     add_log("🌍 [Search] 사실관계 및 리스크 점검 (Naver)...", "search")
     ev_text = ""
     ev_items = []
@@ -586,15 +675,18 @@ def run_workflow(user_input: str, dept: str, officer: str):
         q = " ".join(keywords[:2]) + " 행정처분"
         raw_items = naver_search.search(q, cat="news", display=5)
         for item in raw_items:
-            clean_t = clean_text(item.get("title"))
-            clean_d = clean_text(item.get("description"))
+            clean_t = remove_hanja(item.get("title"))
+            clean_d = remove_hanja(item.get("description"))
             link = clean_text(item.get("link"))
             ev_items.append({"title": clean_t, "link": link, "desc": clean_d})
             ev_text += f"- {clean_t}: {clean_d}\n"
 
-    # 4) Strategy (FAST by default, STRICT if law weak)
+    # 4) Strategy
     prefer_strat = "strict" if legal_status != "CONFIRMED" else "fast"
-    add_log(f"🧠 [Analyst] 처리 전략 수립 ({'STRICT: llama-3.3-70b' if prefer_strat=='strict' else 'FAST: qwen/qwen3-32b'})...", "strat")
+    add_log(
+        f"🧠 [Analyst] 처리 전략 수립 ({'STRICT: llama-3.3-70b' if prefer_strat=='strict' else 'FAST: qwen/qwen3-32b'})...",
+        "strat",
+    )
     prompt_strat = f"""
 [업무유형] {task_type}
 [상황] {user_input}
@@ -615,6 +707,7 @@ def run_workflow(user_input: str, dept: str, officer: str):
 - 모르면 "추가 확인 필요"를 명시
 """
     strategy = llm_service.generate_text(prompt_strat, prefer=prefer_strat, temp=0.1)
+    strategy = remove_hanja(strategy)
 
     # 5) Drafter (STRICT always)
     add_log("✍️ [Drafter] 공문서 초안 작성 (STRICT: llama-3.3-70b-versatile)...", "draft")
@@ -658,8 +751,8 @@ def run_workflow(user_input: str, dept: str, officer: str):
     add_log("💾 [System] 결과 저장 중...", "sys")
     payload = {
         "created_at": datetime.now().isoformat(),
-        "dept": dept,
-        "officer": officer,
+        "dept": clean_text(dept),
+        "officer": clean_text(officer),
         "task_type": task_type,
         "keywords": safe_json_dump(keywords),
         "input": user_input,
@@ -675,7 +768,7 @@ def run_workflow(user_input: str, dept: str, officer: str):
     db_msg = db_service.save_log(payload)
     add_log(f"✅ 완료 ({db_msg})", "sys")
 
-    time.sleep(0.35)
+    time.sleep(0.25)
     log_area.empty()
 
     return {
@@ -703,7 +796,7 @@ def main():
 
     with col_l:
         st.title("AI 행정관 Pro")
-        st.caption("Dual Router v5.0 — FAST(qwen/qwen3-32b) + STRICT(llama-3.3-70b)")
+        st.caption("Dual Router v5.1 — FAST(qwen/qwen3-32b) + STRICT(llama-3.3-70b)")
         st.markdown("---")
 
         with st.expander("📝 사용자 정보 설정", expanded=False):
@@ -741,7 +834,10 @@ def main():
         else:
             st.info("대기 중...")
 
-        st.markdown("<div class='small-muted'>TIP: Planner/Strategy는 FAST, 공문(JSON)은 STRICT로 고정되어 품질-속도 균형을 맞춥니다.</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='small-muted'>TIP: Planner/Strategy는 FAST, 공문(JSON)은 STRICT로 고정되어 품질-속도 균형을 맞춥니다.</div>",
+            unsafe_allow_html=True,
+        )
 
     with col_r:
         res = st.session_state.get("result")
@@ -763,7 +859,9 @@ def main():
             tab1, tab2 = st.tabs(["📄 공문서 결과", "🔍 근거 및 분석"])
 
             with tab1:
-                body_html = "".join([f"<p style='margin:0 0 14px 0;'>{safe_html(p)}</p>" for p in doc["body_paragraphs"]])
+                body_html = "".join(
+                    [f"<p style='margin:0 0 14px 0;'>{safe_html(p)}</p>" for p in doc["body_paragraphs"]]
+                )
                 html = f"""
 <div class="paper-sheet">
   <div class="stamp">직인생략</div>
@@ -779,11 +877,11 @@ def main():
   <div class="doc-footer">{safe_html(doc['department_head'])}</div>
 </div>
 """
-                # ✅ components.html 버그 수정: 불필요한 <head> CSS 삽입 제거
+                # components.html 안정 렌더 (head/css 억지 삽입 X)
                 components.html(html, height=880, scrolling=True)
 
             with tab2:
-                st.success(f"DB: {res.get('db_msg','')}")
+                st.success(f"DB: {res.get('db_msg', '')}")
                 st.info(f"📜 법적 근거 상태: {res.get('legal_status')}")
                 st.info(f"📜 법적 근거:\n{res['legal_basis']}")
 
@@ -809,4 +907,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```0
