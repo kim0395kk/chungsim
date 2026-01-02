@@ -1,45 +1,19 @@
-# app.py — AI 행정관 Pro (Stable / Dual-Model Router v6)
+# app.py — AI 행정관 Pro (Stable / Dual-Model Router v7)
 # Groq: qwen/qwen3-32b (FAST) + llama-3.3-70b-versatile (STRICT)
-# LAWGO(DRF) + NAVER + Supabase (옵션: 로그인/이력)
+# LAWGO(DRF) + NAVER + Supabase(옵션) + "판단 UI(클릭형 원문/사례)"
 #
-# ✅ 정확도 개선 포인트(핵심)
-# 1) Intake(사실/요구/대상/시간/장소/증거) 강제 구조화
-# 2) 법령 후보 3~6개 생성 -> DRF로 원문 확보 -> Verifier 점수로 선택(루프)
-# 3) "법적근거"는 '원문 텍스트'만 정리해서 보여줌(XML/잡문/한자 제거)
-# 4) 공문(JSON)은 STRICT 모델 고정 + JSON 재시도 + 품질체크(QA)
+# ✅ 핵심 UX: 담당자 판단용 브라우저
+# - 법령 후보 리스트(3~8) -> [원문 보기] 클릭 -> 조문 이동(select) -> 원문 전문(expander)
+# - [유사사례] 클릭 -> 웹문서/뉴스 리스트 링크로 확인
+# - 공문은 A4 HTML로 렌더링
 #
-# ⚠️ U+EA01(비표시 문자) 에러 방지:
-# - 이 파일은 "메모장(plain text)"로 붙여넣고 저장하세요.
-# - 한글 워드/웹에서 복붙하면 종종 Private Use Character가 섞입니다.
+# ✅ 정확도 개선:
+# 1) Intake(사실/요구/대상/시간/장소/증거) 구조화
+# 2) 법령 후보 다중 생성 + DRF 원문 확보 + Verifier 점수(참고용)
+# 3) 최종 "자동 선택"은 하되, UI에서 후보를 다 보여줘 담당자가 클릭으로 확정
 #
-# -------------------------------
-# secrets.toml 예시 (Streamlit Cloud)
-# -------------------------------
-# [general]
-# GROQ_API_KEY = "..."
-# GROQ_MODEL_FAST = "qwen/qwen3-32b"
-# GROQ_MODEL_STRICT = "llama-3.3-70b-versatile"
-#
-# [law]
-# LAW_API_ID = "..."  # law.go.kr DRF OC 값
-#
-# [naver]
-# CLIENT_ID = "..."
-# CLIENT_SECRET = "..."
-#
-# [supabase]  # 옵션(로그/히스토리)
-# SUPABASE_URL = "https://xxxx.supabase.co"
-# SUPABASE_KEY = "service_role_or_anon_key"
-#
-# -------------------------------
-# requirements.txt (권장)
-# -------------------------------
-# streamlit
-# groq
-# requests
-# xmltodict
-# supabase
-# python-dateutil
+# ⚠️ 복붙 주의: Private Use Character(U+E000대) 섞이면 에러날 수 있음.
+# - 메모장(plain text)에서 저장 권장.
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -80,7 +54,7 @@ except Exception:
 # =========================
 st.set_page_config(
     layout="wide",
-    page_title="AI 행정관 Pro (Dual v6.0)",
+    page_title="AI 행정관 Pro (Dual v7.0)",
     page_icon="⚖️",
     initial_sidebar_state="collapsed",
 )
@@ -129,6 +103,13 @@ st.markdown(
 }
 .ev-title{ font-weight:700; }
 .ev-desc{ color:#374151; margin-top:4px; }
+
+/* Candidate row */
+.cand-row{
+  background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+  padding:10px 12px; margin:10px 0;
+}
+.cand-sub{ color:#6b7280; font-size:12px; margin-top:4px; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -136,7 +117,7 @@ st.markdown(
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _CTRL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
-# 한자(CJK Unified Ideographs) 제거 (원문에 섞여 나오면 보기 힘들어서 "표시용"에서 제거)
+# 표시용 한자 제거(원문 표시 UX 개선용)
 _HANJA_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF]+")
 
 
@@ -144,7 +125,6 @@ _HANJA_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF]+")
 # 2) Helpers
 # =========================
 def clean_text(value) -> str:
-    """HTML 태그 및 제어문자 제거"""
     if value is None:
         return ""
     s = str(value)
@@ -166,14 +146,11 @@ def truncate_text(s: str, max_chars: int = 2800) -> str:
 
 
 def strip_hanja_for_display(s: str) -> str:
-    """표시용: 한자 제거 + 이상한 구분자(스크린샷 같은 ||> 등) 정리"""
     if not s:
         return ""
     s = _HANJA_RE.sub("", s)
-    # DRF/가공 과정에서 섞이는 잡문 패턴 정리
     s = re.sub(r"\|\>+", "", s)
     s = re.sub(r"\s{2,}", " ", s)
-    s = s.replace("  ", " ")
     return s.strip()
 
 
@@ -218,7 +195,6 @@ def safe_json_dump(obj):
 
 
 def extract_keywords_kor(text: str, max_k: int = 8) -> List[str]:
-    """간이 키워드: LLM 실패시 fallback"""
     if not text:
         return []
     t = re.sub(r"[^가-힣A-Za-z0-9\s]", " ", text)
@@ -267,10 +243,6 @@ metrics_init()
 # 4) LLM Service (Dual Router)
 # =========================
 class LLMService:
-    """
-    - FAST: qwen/qwen3-32b
-    - STRICT: llama-3.3-70b-versatile
-    """
     def __init__(self):
         g = st.secrets.get("general", {})
         self.groq_key = g.get("GROQ_API_KEY")
@@ -351,7 +323,6 @@ class LLMService:
         ]
         model_first = self.model_fast if prefer == "fast" else self.model_strict
 
-        # 1) same model retries
         for _ in range(max_retry):
             try:
                 txt = self._chat(model_first, messages, temp, json_mode=True)
@@ -361,7 +332,6 @@ class LLMService:
             except Exception:
                 pass
 
-        # 2) strict escalate
         try:
             txt = self._chat(self.model_strict, messages, temp, json_mode=True)
             js = self._parse_json(txt)
@@ -387,14 +357,7 @@ class LawAPIService:
         if not self.enabled or not query:
             return []
         try:
-            params = {
-                "OC": self.oc,
-                "target": "law",
-                "type": "XML",
-                "query": query,
-                "display": display,
-                "page": 1,
-            }
+            params = {"OC": self.oc, "target": "law", "type": "XML", "query": query, "display": display, "page": 1}
             r = requests.get(self.search_url, params=params, timeout=7)
             r.raise_for_status()
             data = xmltodict.parse(r.text)
@@ -423,24 +386,9 @@ class LawAPIService:
         articles = law_obj.get("Article", []) or []
         if isinstance(articles, dict):
             articles = [articles]
-        out = []
-        for a in articles:
-            if isinstance(a, dict):
-                out.append(a)
-        return out
+        return [a for a in articles if isinstance(a, dict)]
 
     def get_article_by_mst(self, mst: str, article_no: Optional[str] = None) -> Dict[str, Any]:
-        """
-        반환:
-        {
-          "law_name": "...",
-          "mst": "...",
-          "article_no": "33",
-          "article_title": "...",
-          "article_text": "정리된 본문",
-          "all_articles_index": ["제1조", "제2조", ...] (최대 80개)
-        }
-        """
         if not self.enabled or not mst:
             return {}
 
@@ -454,35 +402,33 @@ class LawAPIService:
             law_name = clean_text(law.get("법령명한글") or law.get("LawName") or law.get("법령명") or "")
             articles = self._extract_articles(law)
 
-            # 인덱스 (UI용)
+            # 조문 인덱스(UI용)
             idx = []
-            for a in articles[:80]:
+            for a in articles[:120]:
                 at = clean_text(a.get("ArticleTitle") or "")
                 an = clean_text(a.get("@조문번호") or "")
                 if at:
                     idx.append(at)
                 elif an:
                     idx.append(f"제{an}조")
-            # article_no 없으면, 일부라도 보여줄 수 있게 1조 반환
+
+            # article_no 없으면 1조라도 반환(인덱스+샘플)
             if not article_no:
-                # 첫 조문 구성
                 if articles:
-                    a0 = articles[0]
-                    return self._format_article(law_name, mst, a0, idx)
+                    return self._format_article(law_name, mst, articles[0], idx)
                 return {"law_name": law_name, "mst": mst, "all_articles_index": idx}
 
             tgt = re.sub(r"[^0-9]", "", str(article_no))
             if not tgt:
                 return {"law_name": law_name, "mst": mst, "all_articles_index": idx}
 
-            # 조문 매칭: 조문번호 또는 제목 "제NN조"
+            # 조문 매칭
             for a in articles:
                 an = clean_text(a.get("@조문번호") or "")
                 at = clean_text(a.get("ArticleTitle") or "")
                 if tgt == re.sub(r"[^0-9]", "", an) or (tgt and f"제{tgt}조" in at):
                     return self._format_article(law_name, mst, a, idx)
 
-            # 못 찾으면 빈값
             return {"law_name": law_name, "mst": mst, "article_no": tgt, "all_articles_index": idx}
 
         except Exception:
@@ -493,7 +439,6 @@ class LawAPIService:
         an = clean_text(art.get("@조문번호") or "")
         content = clean_text(art.get("ArticleContent") or "")
 
-        # 항/호 문단 합치기
         paras = art.get("Paragraph", [])
         if isinstance(paras, dict):
             paras = [paras]
@@ -507,7 +452,7 @@ class LawAPIService:
 
         text = "\n".join([x for x in [content] + p_lines if x]).strip()
         text = normalize_whitespace(text)
-        text_disp = strip_hanja_for_display(text)  # 보기 좋게 한자 제거
+        text_disp = strip_hanja_for_display(text)
 
         return {
             "law_name": law_name,
@@ -532,14 +477,14 @@ class NaverSearchService:
         self.csec = n.get("CLIENT_SECRET")
         self.enabled = bool(requests and self.cid and self.csec)
 
-    def search(self, query: str, cat: str = "news", display: int = 5):
+    def search(self, query: str, cat: str = "webkr", display: int = 8):
         if not self.enabled or not query:
             return []
         try:
             url = f"https://openapi.naver.com/v1/search/{cat}.json"
             headers = {"X-Naver-Client-Id": self.cid, "X-Naver-Client-Secret": self.csec}
             params = {"query": query, "display": display, "sort": "sim", "start": 1}
-            r = requests.get(url, headers=headers, params=params, timeout=6)
+            r = requests.get(url, headers=headers, params=params, timeout=7)
             r.raise_for_status()
             return r.json().get("items", []) or []
         except Exception:
@@ -550,7 +495,7 @@ naver = NaverSearchService()
 
 
 # =========================
-# 7) Supabase (로그/히스토리)
+# 7) Supabase (옵션)
 # =========================
 class DatabaseService:
     def __init__(self):
@@ -568,7 +513,6 @@ class DatabaseService:
         return bool(self.client)
 
     def insert_run(self, row: dict) -> Tuple[bool, str, Optional[str]]:
-        """runs 테이블 insert, run_id 리턴(가능하면)"""
         if not self.client:
             return False, "DB 미연결", None
         try:
@@ -585,95 +529,22 @@ class DatabaseService:
         except Exception as e:
             return False, f"저장 실패: {e}", None
 
-    def insert_step(self, row: dict) -> None:
-        if not self.client:
-            return
-        try:
-            safe_row = json.loads(safe_json_dump(row))
-            self.client.table("run_steps").insert(safe_row).execute()
-        except Exception:
-            return
-
-    def insert_artifact(self, row: dict) -> None:
-        if not self.client:
-            return
-        try:
-            safe_row = json.loads(safe_json_dump(row))
-            self.client.table("artifacts").insert(safe_row).execute()
-        except Exception:
-            return
-
-    def list_runs(self, user_key: str, limit: int = 20):
-        """간단 유저키 기반 히스토리(진짜 Auth 대신)"""
-        if not self.client:
-            return []
-        try:
-            resp = (
-                self.client.table("runs")
-                .select("run_id, created_at, task_type, law_name, article_no, final_verdict")
-                .eq("user_id", user_key)
-                .order("created_at", desc=True)
-                .limit(limit)
-                .execute()
-            )
-            return getattr(resp, "data", []) or []
-        except Exception:
-            return []
-
-    def load_run_detail(self, run_id: str):
-        if not self.client or not run_id:
-            return None
-        try:
-            r1 = (
-                self.client.table("runs")
-                .select("*")
-                .eq("run_id", run_id)
-                .limit(1)
-                .execute()
-            )
-            data = getattr(r1, "data", None)
-            if not data:
-                return None
-            run_row = data[0]
-
-            art = (
-                self.client.table("artifacts")
-                .select("kind, content, created_at")
-                .eq("run_id", run_id)
-                .order("created_at", desc=True)
-                .execute()
-            )
-            art_data = getattr(art, "data", []) or []
-            run_row["_artifacts"] = art_data
-            return run_row
-        except Exception:
-            return None
-
 
 db = DatabaseService()
 
 
 # =========================
-# 8) Core Logic (Agentic-ish)
+# 8) Core Logic
 # =========================
 def intake_schema(user_input: str) -> Dict[str, Any]:
-    """
-    민원 상황을 '사실/요구/대상/시간/장소/증거/쟁점/키워드'로 강제 구조화.
-    이게 정확도 핵심(법령 엉뚱함 방지).
-    """
     kw_fallback = extract_keywords_kor(user_input, max_k=10)
 
     prompt = f"""
-다음 민원/업무 지시를 "행정사실관계" 중심으로 구조화해라.
+다음 민원/업무 지시를 "행정 사실관계" 중심으로 구조화해라.
 반드시 아래 JSON 스키마만 출력(키 추가 금지).
 
 {{
   "task_type": "주기위반|무단방치|불법주정차|행정처분|정보공개|기타",
-  "authority_scope": {{
-    "my_role": "주기위반 단속 담당",
-    "can_do": ["현장확인","계도","통지","안내","이관"],
-    "cannot_do": ["형사수사","강제집행","압수수색","구금"]
-  }},
   "facts": {{
     "who": "대상(차량/건설기계/업체/개인 등)",
     "what": "무슨 일이 있었는지(핵심 1~2문장)",
@@ -693,16 +564,15 @@ def intake_schema(user_input: str) -> Dict[str, Any]:
 \"\"\"{user_input}\"\"\"
 
 주의:
-- 소설 금지. 입력에 없는 사실은 '추가 확인 필요'로 처리.
+- 입력에 없는 사실은 "추가 확인 필요"로 처리.
 - 장소/시간이 없으면 빈문자열.
-- keywords는 '사실 기반' 핵심어로.
+- keywords는 사실 기반 핵심어로.
 """
     js = llm.generate_json(prompt, prefer="fast", max_retry=2) or {}
-    # 보정
+
     if not js:
-        return {
+        js = {
             "task_type": "기타",
-            "authority_scope": {"my_role": "주기위반 단속 담당", "can_do": ["현장확인", "계도", "통지", "안내", "이관"], "cannot_do": ["형사수사", "강제집행", "압수수색", "구금"]},
             "facts": {"who": "", "what": user_input[:120], "where": "", "when": "", "evidence": []},
             "request": {"user_wants": "", "constraints": ""},
             "issues": [],
@@ -719,7 +589,6 @@ def intake_schema(user_input: str) -> Dict[str, Any]:
         js["issues"] = []
     js["issues"] = [clean_text(x) for x in js["issues"] if clean_text(x)]
 
-    # input quality (룰)
     missing = []
     facts = js.get("facts") if isinstance(js.get("facts"), dict) else {}
     if not clean_text(facts.get("where")):
@@ -732,15 +601,11 @@ def intake_schema(user_input: str) -> Dict[str, Any]:
 
 
 def generate_law_candidates(case: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    법령 후보는 1개가 아니라 여러 개!
-    여기서 '엉뚱한 법령' 확률이 확 줄어듦.
-    """
     task_type = clean_text(case.get("task_type"))
     facts = case.get("facts") if isinstance(case.get("facts"), dict) else {}
     issues = case.get("issues", [])
     keywords = case.get("keywords", [])
-    # rule hint (업무 도메인)
+
     domain_hint = []
     if task_type == "주기위반":
         domain_hint += ["건설기계관리법", "건설기계관리법 시행령", "도로교통법"]
@@ -754,8 +619,7 @@ def generate_law_candidates(case: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 {{
   "candidates": [
-    {{"law_name":"법령명","article_hint":"조번호(숫자만, 모르면 빈문자열)","reason":"짧게","confidence":0.0}},
-    {{"law_name":"...","article_hint":"","reason":"...","confidence":0.0}}
+    {{"law_name":"법령명","article_hint":"조번호(숫자만, 모르면 빈문자열)","reason":"짧게","confidence":0.0}}
   ]
 }}
 
@@ -770,17 +634,17 @@ def generate_law_candidates(case: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 규칙:
 - candidates는 3~6개
-- law_name은 "공식 법령명" 우선
-- 확신 없으면 confidence 낮게
+- law_name은 공식 법령명 우선
 - article_hint는 모르면 빈문자열
-- '내 권한(주기위반 단속 담당)' 범위에서 다룰 가능성이 큰 법령 우선
+- 담당자가 "클릭으로 원문 확인"할 수 있게 넓게 뽑되 엉뚱한 분야는 제외
 """
     js = llm.generate_json(prompt, prefer="fast", max_retry=2) or {}
     cands = js.get("candidates", []) if isinstance(js.get("candidates"), list) else []
+
     out = []
-    # 룰 기반 보강
     for x in domain_hint:
         out.append({"law_name": x, "article_hint": "", "reason": "도메인 규칙 후보", "confidence": 0.35})
+
     for c in cands:
         if not isinstance(c, dict):
             continue
@@ -794,7 +658,7 @@ def generate_law_candidates(case: Dict[str, Any]) -> List[Dict[str, Any]]:
             "confidence": float(c.get("confidence") or 0.0),
         })
 
-    # 중복 제거(법령명 기준)
+    # 중복 제거
     seen = set()
     uniq = []
     for c in out:
@@ -809,19 +673,11 @@ def generate_law_candidates(case: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def verifier_score(case: Dict[str, Any], law_name: str, article_title: str, article_text: str) -> Dict[str, Any]:
-    """
-    점수화 Verifier (0~100).
-    - relevance: 키워드/쟁점 vs 조문 텍스트
-    - scope_fit: 주기위반 담당자 권한 범위에 맞는지
-    - article_match: 제목/내용이 직접 연결되는지
-    - hallucination_risk: 원문이 빈약하거나 추측성
-    """
     keywords = case.get("keywords", [])
     issues = case.get("issues", [])
     facts = case.get("facts", {}) if isinstance(case.get("facts"), dict) else {}
     text = (article_title + "\n" + article_text).lower()
 
-    # relevance (룰)
     hits = 0
     pool = []
     for w in keywords[:8]:
@@ -841,15 +697,11 @@ def verifier_score(case: Dict[str, Any], law_name: str, article_title: str, arti
             hits += 1
     relevance = min(35, int((hits / max(1, len(pool))) * 35))
 
-    # scope_fit (룰)
-    # 권한 밖 키워드가 조문에 많으면 감점
     out_of_scope = ["구속", "수사", "압수", "수색", "체포", "기소", "형사", "구금"]
     o_hits = sum(1 for w in out_of_scope if w in article_text)
     scope_fit = 25 - min(25, o_hits * 8)
     scope_fit = max(0, scope_fit)
 
-    # article_match (룰)
-    # 제목이 명확하면 가점, 조문이 너무 짧으면 감점
     match = 10
     if len(article_text) >= 200:
         match += 10
@@ -857,24 +709,15 @@ def verifier_score(case: Dict[str, Any], law_name: str, article_title: str, arti
         match += 5
     article_match = min(25, match)
 
-    # hallucination_risk (룰)
     risk = 0
     if not article_text or len(article_text) < 80:
         risk += 10
-    if "추가 확인 필요" in article_text:
-        risk += 2
-    # display 텍스트가 너무 깨져 있으면
     if "||" in article_text or ">>" in article_text:
         risk += 5
     risk = min(15, risk)
 
     total = relevance + scope_fit + article_match + (15 - risk)
-    if total >= 75:
-        verdict = "CONFIRMED"
-    elif total >= 50:
-        verdict = "WEAK"
-    else:
-        verdict = "FAIL"
+    verdict = "CONFIRMED" if total >= 75 else ("WEAK" if total >= 50 else "FAIL")
 
     return {
         "score_total": int(total),
@@ -904,7 +747,7 @@ def draft_strategy(case: Dict[str, Any], law_pack: Dict[str, Any], evidence_text
 [민원 요구] {case.get("request",{}).get("user_wants","")}
 [쟁점] {case.get("issues",[])}
 
-[법적근거(선택)]
+[법적근거(참고)]
 - 법령: {law_pack.get("law_name","")}
 - 조문: {law_pack.get("article_title","")}
 - 원문(요약): {truncate_text(law_pack.get("article_text",""), 900)}
@@ -914,9 +757,8 @@ def draft_strategy(case: Dict[str, Any], law_pack: Dict[str, Any], evidence_text
 
 아래 형식(마크다운)만 출력:
 1) 처리 방향(현실적인 행정 프로세스 중심, 5~8줄)
-2) 체크리스트(불릿 8~12개, "확인/기록/통지/기한" 포함)
-3) 권한범위(내가 할 수 있는 것/없는 것 각 3~5개)
-4) 민원인 설명 포인트(오해 줄이는 문장 3~5개)
+2) 체크리스트(불릿 8~12개, 확인/기록/통지/기한 포함)
+3) 민원인 설명 포인트(오해 줄이는 문장 3~5개)
 """
     return llm.generate_text(prompt, prefer=prefer, temp=0.1)
 
@@ -948,7 +790,7 @@ def draft_document_json(dept: str, officer: str, case: Dict[str, Any], law_pack:
 - 민원요구: {case.get("request",{}).get("user_wants","")}
 - 제약/기한: {case.get("request",{}).get("constraints","")}
 
-법적 근거(선택/확보된 범위):
+법적 근거(참고/확보된 범위):
 - 법령: {law_pack.get("law_name","")}
 - 조문: {law_pack.get("article_title","")}
 - 원문: {truncate_text(law_pack.get("article_text",""), 1200)}
@@ -968,30 +810,9 @@ def draft_document_json(dept: str, officer: str, case: Dict[str, Any], law_pack:
     return out
 
 
-def qa_guardrails(doc: Dict[str, Any], law_pack: Dict[str, Any]) -> Dict[str, Any]:
-    """필수요소/금지요소 간단 검사 후 보정 힌트"""
-    issues = []
-    if not doc.get("title"):
-        issues.append("title_missing")
-    if not doc.get("receiver"):
-        issues.append("receiver_missing")
-    if not isinstance(doc.get("body_paragraphs"), list) or len(doc.get("body_paragraphs")) < 2:
-        issues.append("body_weak")
-
-    # '단정/추측' 완화: 너무 공격적/추측적 문구 제거는 LLM 재작성까지는 안하고 경고만
-    forbidden = ["확실히", "반드시", "100%", "무조건", "무차별"]
-    body = "\n".join(doc.get("body_paragraphs", []))
-    if any(x in body for x in forbidden):
-        issues.append("overconfident_language")
-
-    # 법령이 FAIL인데 법령 단정하면 문제
-    if law_pack.get("verdict") == "FAIL" and ("법령" in body or "제" in body):
-        issues.append("law_claim_without_confidence")
-
-    doc["_qa"] = {"issues": issues}
-    return doc
-
-
+# =========================
+# 9) Workflow
+# =========================
 def run_workflow(user_input: str, dept: str, officer: str, user_key: str):
     log_area = st.empty()
     logs = []
@@ -1003,49 +824,33 @@ def run_workflow(user_input: str, dept: str, officer: str, user_key: str):
 
     started = datetime.now().isoformat()
 
-    # STEP: INTAKE
-    add_log("🧾 [INTAKE] 민원/업무 내용을 사실관계 중심으로 구조화… (FAST)", "sys")
-    t0 = time.time()
+    add_log("🧾 [INTAKE] 사실관계 중심 구조화… (FAST)", "sys")
     case = intake_schema(user_input)
-    db_step_payload = {"case": case}
-    # STEP LOG
-    if db.enabled():
-        db.insert_step({
-            "run_id": None,  # run_id는 나중에 insert 후 업데이트가 이상적이지만, 단순화
-            "step_name": "INTAKE",
-            "model_used": llm.model_fast,
-            "tokens": 0,
-            "cost": 0,
-            "payload_json": db_step_payload
-        })
     add_log(f"✅ [INTAKE] 완료 (quality={case.get('_input_quality',{}).get('score','?')})", "sys")
 
-    # STEP: LAW CANDIDATES
-    add_log("🧩 [LAW-CAND] 법령 후보 3~6개 생성… (FAST)", "legal")
+    add_log("🧩 [LAW-CAND] 법령 후보 생성… (FAST)", "legal")
     candidates = generate_law_candidates(case)
     if not candidates:
         candidates = [{"law_name": k, "article_hint": "", "reason": "fallback", "confidence": 0.2} for k in case.get("keywords", [])[:3]]
-    add_log(f"📌 후보: " + ", ".join([c['law_name'] for c in candidates[:6]]), "legal")
+    add_log("📌 후보: " + ", ".join([c['law_name'] for c in candidates[:6]]), "legal")
 
-    # STEP: LAW FETCH + VERIFY LOOP
-    add_log("📚 [LAW] DRF로 원문 확보 + 검증 점수화…", "legal")
+    add_log("📚 [LAW] DRF 원문 확보 + Verifier(참고용) 점수화…", "legal")
     best_pack = {
         "law_name": "",
         "mst": "",
+        "link": "",
         "article_title": "",
         "article_text": "",
         "verdict": "FAIL",
         "score": 0,
-        "debug": {}
+        "verify": {},
     }
-
     loop_debug = []
     for i, cand in enumerate(candidates[:6], start=1):
         q = cand.get("law_name", "")
         art_hint = cand.get("article_hint", "")
         add_log(f"  - ({i}) {q} 검색 → 원문 확인", "legal")
 
-        # 1) search
         laws = law_api.search_law(q, display=10)
         if not laws:
             loop_debug.append({"cand": cand, "search": "no_result"})
@@ -1056,7 +861,6 @@ def run_workflow(user_input: str, dept: str, officer: str, user_key: str):
         law_name = clean_text(chosen.get("lawNm"))
         link = clean_text(chosen.get("link"))
 
-        # 2) fetch (조문 힌트가 있으면 그 조문, 없으면 1조라도)
         pack = law_api.get_article_by_mst(mst, article_no=art_hint if art_hint else None)
         article_title = clean_text(pack.get("article_title", ""))
         article_text = clean_text(pack.get("article_text", ""))
@@ -1064,7 +868,6 @@ def run_workflow(user_input: str, dept: str, officer: str, user_key: str):
             loop_debug.append({"cand": cand, "mst": mst, "fetch": "empty"})
             continue
 
-        # 3) verify score
         v = verifier_score(case, law_name, article_title, article_text)
         score = v["score_total"]
         verdict = v["verdict"]
@@ -1085,23 +888,20 @@ def run_workflow(user_input: str, dept: str, officer: str, user_key: str):
                 "verdict": verdict,
                 "score": score,
                 "verify": v,
-                "debug": {"cand": cand, "selected": chosen, "loop": loop_debug[-1]}
             }
 
-        # 확정이면 바로 종료(성능↑)
         if verdict == "CONFIRMED":
             break
 
-    add_log(f"✅ [LAW] 선택: {best_pack.get('law_name','(없음)')} / {best_pack.get('article_title','')} (score={best_pack.get('score',0)}, {best_pack.get('verdict')})", "legal")
+    add_log(f"✅ [LAW] 자동선택(참고): {best_pack.get('law_name','(없음)')} / {best_pack.get('article_title','')} (score={best_pack.get('score',0)}, {best_pack.get('verdict')})", "legal")
 
-    # STEP: NAVER EVIDENCE
-    add_log("🌍 [EVIDENCE] 네이버 참고자료(선택) 수집…", "search")
+    add_log("🌍 [EVIDENCE] 네이버 유사사례(선택) 수집…", "search")
     ev_items = []
     ev_text = ""
     kw = case.get("keywords", [])
     if kw:
         q = " ".join(kw[:2]) + " 행정처분"
-        raw = naver.search(q, cat="news", display=5)
+        raw = naver.search(q, cat="webkr", display=8)
         for item in raw:
             title = clean_text(item.get("title"))
             desc = clean_text(item.get("description"))
@@ -1110,27 +910,22 @@ def run_workflow(user_input: str, dept: str, officer: str, user_key: str):
             ev_text += f"- {title}: {desc}\n"
     add_log(f"✅ [EVIDENCE] {len(ev_items)}건", "search")
 
-    # STEP: STRATEGY
-    add_log("🧠 [STRATEGY] 처리 전략 요약… (FAST/STRICT 자동)", "strat")
+    add_log("🧠 [STRATEGY] 처리 전략… (FAST/STRICT)", "strat")
     strategy = draft_strategy(case, best_pack, ev_text)
 
-    # STEP: DRAFT
     add_log("✍️ [DRAFT] 공문 JSON 생성… (STRICT)", "draft")
     doc = draft_document_json(dept, officer, case, best_pack, strategy)
-    doc = qa_guardrails(doc, best_pack)
 
-    # A4 HTML 생성
     meta = doc.get("_meta", {})
     doc_num = meta.get("doc_num", "")
     today = meta.get("today", "")
 
-    # STEP: SAVE
-    add_log("💾 [SAVE] 이력 저장…", "sys")
-    run_id = None
+    add_log("💾 [SAVE] (옵션) DB 저장…", "sys")
     db_msg = "DB 미연결"
+    run_id = None
     if db.enabled():
         ok, msg, rid = db.insert_run({
-            "user_id": user_key,               # 간이 user_key (실제 Auth 대신)
+            "user_id": user_key,
             "created_at": started,
             "task_type": clean_text(case.get("task_type","")),
             "input_text": user_input,
@@ -1138,48 +933,176 @@ def run_workflow(user_input: str, dept: str, officer: str, user_key: str):
             "final_verdict": best_pack.get("verdict"),
             "law_name": best_pack.get("law_name"),
             "law_mst": best_pack.get("mst"),
-            "article_no": best_pack.get("verify",{}).get("score_breakdown",{}),  # 테이블 설계에 맞춰 수정 가능
             "total_tokens": int(st.session_state.get("metrics",{}).get("tokens_total",0)),
-            "total_cost": 0,
-            "status": "DONE"
+            "status": "DONE",
+            "result_json": safe_json_dump({
+                "case": case, "best_law": best_pack, "strategy": strategy, "doc": ensure_doc_shape(doc), "candidates": candidates
+            })
         })
         db_msg = msg
         run_id = rid
-
-        # artifacts 저장(선택)
-        if run_id:
-            db.insert_artifact({"run_id": run_id, "kind": "case_json", "content": safe_json_dump(case)})
-            db.insert_artifact({"run_id": run_id, "kind": "law_pack_json", "content": safe_json_dump(best_pack)})
-            db.insert_artifact({"run_id": run_id, "kind": "strategy_md", "content": strategy})
-            db.insert_artifact({"run_id": run_id, "kind": "draft_json", "content": safe_json_dump(doc)})
-            # A4 html도 저장하고 싶으면:
-            # db.insert_artifact({"run_id": run_id, "kind": "draft_html", "content": "..."})
 
     add_log(f"✅ 완료 ({db_msg})", "sys")
     time.sleep(0.25)
     log_area.empty()
 
-    # 반환
     return {
         "case": case,
-        "law": best_pack,
+        "candidates": candidates,     # ✅ 후보 리스트(클릭형 UI 핵심)
+        "best_law": best_pack,        # ✅ 자동선택(참고용)
         "strategy": strategy,
         "doc": ensure_doc_shape(doc),
         "doc_meta": {"doc_num": doc_num, "today": today, "dept": dept, "officer": officer},
         "ev_items": ev_items,
         "loop_debug": loop_debug,
         "db_msg": db_msg,
-        "run_id": run_id
+        "run_id": run_id,
     }
 
 
 # =========================
-# 9) UI
+# 10) 판단 UI(클릭형 원문/사례)
+# =========================
+def ss_init():
+    st.session_state.setdefault("selected_mst", "")
+    st.session_state.setdefault("selected_law_name", "")
+    st.session_state.setdefault("selected_article_no", "")
+    st.session_state.setdefault("selected_article_title", "")
+    st.session_state.setdefault("selected_article_text", "")
+    st.session_state.setdefault("selected_law_link", "")
+    st.session_state.setdefault("case_examples", [])
+ss_init()
+
+
+def build_law_link_fallback(mst: str) -> str:
+    # DRF link가 없을 때도 최소한의 이동 경로 제공
+    if not mst:
+        return ""
+    return f"https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq={mst}"
+
+
+def ui_law_browser(case: dict, candidates: list):
+    st.markdown("## ⚖️ 법령 후보 (원문/사례 클릭해서 판단)")
+    st.caption("자동선택은 참고용입니다. 후보를 눌러 원문과 사례를 직접 보고 확정하세요.")
+
+    if not candidates:
+        st.warning("법령 후보가 없습니다. 입력 내용을 더 구체화하세요(대상/장소/기간/증거).")
+        return
+
+    for idx, c in enumerate(candidates[:8], start=1):
+        law_name = clean_text(c.get("law_name",""))
+        article_hint = clean_text(c.get("article_hint",""))
+        reason = clean_text(c.get("reason",""))
+        conf = c.get("confidence", 0.0)
+
+        st.markdown(
+            f"<div class='cand-row'><div><b>{idx}. {escape(law_name)}</b></div>"
+            f"<div class='cand-sub'>힌트 조문: {escape(article_hint or '-')} · 신뢰도: {conf}</div>"
+            f"<div class='cand-sub'>사유: {escape(reason or '')}</div></div>",
+            unsafe_allow_html=True
+        )
+
+        colA, colB = st.columns([1, 1])
+        with colA:
+            if st.button("📜 원문 보기", key=f"btn_law_open_{idx}", use_container_width=True):
+                laws = law_api.search_law(law_name, display=10)
+                if not laws:
+                    st.warning(f"'{law_name}' 검색 결과 없음")
+                else:
+                    chosen = laws[0]
+                    mst = clean_text(chosen.get("MST"))
+                    ln = clean_text(chosen.get("lawNm")) or law_name
+                    link = clean_text(chosen.get("link")) or build_law_link_fallback(mst)
+
+                    pack = law_api.get_article_by_mst(mst, article_no=article_hint if article_hint else None)
+                    st.session_state["selected_mst"] = mst
+                    st.session_state["selected_law_name"] = ln
+                    st.session_state["selected_article_no"] = clean_text(pack.get("article_no",""))
+                    st.session_state["selected_article_title"] = clean_text(pack.get("article_title",""))
+                    st.session_state["selected_article_text"] = clean_text(pack.get("article_text",""))
+                    st.session_state["selected_law_link"] = link
+
+        with colB:
+            if st.button("🧩 유사사례", key=f"btn_case_{idx}", use_container_width=True):
+                kw = case.get("keywords", [])
+                base = " ".join([clean_text(x) for x in kw[:2] if clean_text(x)])
+                q = f"{law_name} {article_hint} {base}".strip()
+                items = naver.search(q, cat="webkr", display=10)
+                ex = []
+                for it in items:
+                    ex.append({
+                        "title": clean_text(it.get("title")),
+                        "desc": clean_text(it.get("description")),
+                        "link": clean_text(it.get("link")),
+                    })
+                st.session_state["case_examples"] = ex
+
+        st.markdown("---")
+
+
+def ui_law_viewer():
+    st.markdown("## 📜 선택한 법령 원문")
+    mst = st.session_state.get("selected_mst","")
+    if not mst:
+        st.info("위 후보에서 **원문 보기**를 눌러주세요.")
+        return
+
+    law_name = st.session_state.get("selected_law_name","")
+    art_title = st.session_state.get("selected_article_title","")
+    art_text = st.session_state.get("selected_article_text","")
+    link = st.session_state.get("selected_law_link","")
+
+    st.markdown(f"**법령:** {law_name}")
+    if link:
+        st.markdown(f"**상세 링크:** [{link}]({link})")
+
+    # 조문 인덱스 제공
+    pack_idx = law_api.get_article_by_mst(mst, article_no=None) or {}
+    idx_list = pack_idx.get("all_articles_index", []) if isinstance(pack_idx.get("all_articles_index"), list) else []
+
+    if idx_list:
+        pick = st.selectbox("조문 이동", ["(현재 조문 유지)"] + idx_list)
+        if pick != "(현재 조문 유지)":
+            m = re.search(r"제(\d+)조", pick)
+            if m:
+                art_no = m.group(1)
+                pack2 = law_api.get_article_by_mst(mst, article_no=art_no) or {}
+                st.session_state["selected_article_title"] = clean_text(pack2.get("article_title",""))
+                st.session_state["selected_article_text"] = clean_text(pack2.get("article_text",""))
+                art_title = st.session_state["selected_article_title"]
+                art_text = st.session_state["selected_article_text"]
+
+    st.markdown(f"### {art_title or '조문'}")
+    if not art_text:
+        st.warning("조문 텍스트를 가져오지 못했습니다. 다른 후보를 눌러보세요.")
+        return
+
+    with st.expander("원문 전문 펼치기", expanded=True):
+        st.code(normalize_whitespace(strip_hanja_for_display(art_text)), language="text")
+
+
+def ui_case_examples():
+    st.markdown("## 🧩 유사사례(클릭해서 확인)")
+    ex = st.session_state.get("case_examples", []) or []
+    if not ex:
+        st.info("법령 후보에서 **유사사례** 버튼을 누르면 여기에 뜹니다.")
+        return
+
+    for it in ex[:12]:
+        title = clean_text(it.get("title",""))
+        desc = clean_text(it.get("desc",""))
+        link = clean_text(it.get("link",""))
+        if link:
+            st.markdown(f"- **[{title}]({link})**  \n  {desc}")
+        else:
+            st.markdown(f"- **{title}**  \n  {desc}")
+
+
+# =========================
+# 11) Renderers
 # =========================
 def render_a4(doc: Dict[str, Any], meta: Dict[str, str]):
-    body_html = "".join(
-        [f"<p style='margin:0 0 14px 0;'>{safe_html(p)}</p>" for p in doc.get("body_paragraphs", [])]
-    )
+    body_html = "".join([f"<p style='margin:0 0 14px 0;'>{safe_html(p)}</p>" for p in doc.get("body_paragraphs", [])])
     html = f"""
 <div class="paper-sheet">
   <div class="stamp">직인생략</div>
@@ -1195,69 +1118,41 @@ def render_a4(doc: Dict[str, Any], meta: Dict[str, str]):
   <div class="doc-footer">{safe_html(doc.get('department_head',''))}</div>
 </div>
 """
-    components.html(html, height=900, scrolling=True)
+    components.html(html, height=920, scrolling=True)
 
 
-def render_law(law_pack: Dict[str, Any]):
-    law_name = law_pack.get("law_name", "")
-    article_title = law_pack.get("article_title", "")
-    verdict = law_pack.get("verdict", "")
-    score = law_pack.get("score", 0)
-    link = law_pack.get("link", "")
-
-    st.markdown(f"**선택 법령:** {law_name}  \n**조문:** {article_title}  \n**검증:** {verdict} / score={score}")
-    if link:
-        st.markdown(f"- 상세 링크: {link}")
-
-    txt = law_pack.get("article_text", "") or ""
-    txt = normalize_whitespace(txt)
-    txt = strip_hanja_for_display(txt)
-
-    if not txt:
-        st.warning("조문 원문을 표시할 수 없습니다(빈 텍스트). 후보를 바꿔야 합니다.")
-        return
-
-    # 보기 좋은 형태: 제목 + 조문을 코드블록/프리텍스트로
-    st.markdown("### 조문 원문(정리본)")
-    st.code(txt, language="text")
-
-    v = law_pack.get("verify") or {}
-    if v:
-        st.markdown("### Verifier 점수")
-        st.json(v)
-
-
+# =========================
+# 12) Main UI
+# =========================
 def main():
-    # 간이 사용자 키(로그인 대신): 조직/사용자 구분용
     st.session_state.setdefault("user_key", "local_user")
-
     st.session_state.setdefault("dept", "OO시청 OO과")
     st.session_state.setdefault("officer", "김주무관")
 
-    col_l, col_r = st.columns([1, 1.2], gap="large")
+    col_l, col_r = st.columns([1, 1.25], gap="large")
 
     with col_l:
         st.title("AI 행정관 Pro")
-        st.caption("Dual Router v6.0 — FAST(qwen/qwen3-32b) + STRICT(llama-3.3-70b) + Law Verifier Loop")
+        st.caption("Dual Router v7.0 — 클릭형 원문/사례 기반 '판단 UI' + A4 공문 렌더링")
         st.markdown("---")
 
         with st.expander("🧩 사용자/부서 설정", expanded=False):
             st.text_input("부서명", key="dept")
             st.text_input("담당자", key="officer")
             st.text_input("사용자 키(히스토리 구분용, 임의)", key="user_key")
-            st.caption("※ Supabase Auth를 붙이려면 여기 user_key 대신 auth.uid()를 넣는 구조로 확장하세요.")
+            st.caption("※ Supabase 미설정이어도 정상 동작합니다.")
 
         user_input = st.text_area(
             "업무 지시 사항(민원 상황 포함)",
-            height=220,
-            placeholder="예: 건설기계가 차고지 외 장기간 주차(주기위반) 신고가 들어왔고, 현장 확인했더니 이동한 상태. 민원인은 상시 단속을 요구. 담당자가 할 수 있는 조치와 답변 공문 작성.",
+            height=240,
+            placeholder="예: 건설기계가 차고지 외 장기간 주차(주기위반) 신고가 들어옴. 현장 확인했더니 이동한 상태. 민원인은 상시 단속을 요구. 담당자가 할 수 있는 조치와 공문 초안 작성.",
         )
 
-        if st.button("🚀 문서 생성 실행", type="primary", use_container_width=True):
+        if st.button("🚀 실행(구조화→법령후보→원문확보→공문작성)", type="primary", use_container_width=True):
             if not user_input.strip():
                 st.warning("내용을 입력하세요.")
             else:
-                with st.spinner("에이전트(구조화→법령후보→원문확보→검증→공문작성) 실행 중..."):
+                with st.spinner("실행 중..."):
                     try:
                         res = run_workflow(
                             user_input.strip(),
@@ -1266,6 +1161,15 @@ def main():
                             st.session_state["user_key"],
                         )
                         st.session_state["result"] = res
+
+                        # 자동선택 법령을 우선 '선택 상태'에 로드(바로 원문탭에서 보이게)
+                        best = res.get("best_law", {}) or {}
+                        if best.get("mst"):
+                            st.session_state["selected_mst"] = best.get("mst","")
+                            st.session_state["selected_law_name"] = best.get("law_name","")
+                            st.session_state["selected_article_title"] = best.get("article_title","")
+                            st.session_state["selected_article_text"] = best.get("article_text","")
+                            st.session_state["selected_law_link"] = best.get("link","") or build_law_link_fallback(best.get("mst",""))
                     except Exception as e:
                         st.error(f"치명적 오류: {e}")
 
@@ -1282,35 +1186,22 @@ def main():
         else:
             st.info("대기 중...")
 
-        st.markdown("<div class='small-muted'>핵심: 법령은 1번 찍지 않고, 후보→원문→검증점수 루프를 돌려서 엉뚱한 법령을 줄입니다.</div>", unsafe_allow_html=True)
-
-        # History (옵션)
-        if db.enabled():
-            st.markdown("---")
-            st.subheader("🕘 히스토리(최근)")
-            runs = db.list_runs(st.session_state["user_key"], limit=15)
-            if runs:
-                opts = [f"{r.get('created_at','')} | {r.get('task_type','')} | {r.get('final_verdict','')}" for r in runs]
-                idx = st.selectbox("불러올 실행 기록 선택", range(len(opts)), format_func=lambda i: opts[i])
-                if st.button("불러오기", use_container_width=True):
-                    rid = runs[idx].get("run_id")
-                    detail = db.load_run_detail(rid)
-                    if detail:
-                        st.session_state["history_detail"] = detail
-            else:
-                st.caption("runs 테이블에 저장된 기록이 없습니다(테이블/권한 확인).")
+        st.markdown(
+            "<div class='small-muted'>핵심: 자동선택은 참고용. 담당자는 후보를 클릭해 원문·사례를 직접 확인하고 판단합니다.</div>",
+            unsafe_allow_html=True
+        )
 
     with col_r:
-        tab_main, tab_debug, tab_history = st.tabs(["📄 공문서(A4)", "🔍 근거/전략", "🧾 히스토리 상세"])
+        tab_doc, tab_law, tab_case, tab_debug = st.tabs(["📄 공문(A4)", "⚖️ 법령 원문", "🧩 유사사례", "🧪 디버그"])
+        res = st.session_state.get("result")
 
-        with tab_main:
-            res = st.session_state.get("result")
+        with tab_doc:
             if not res:
                 st.markdown(
                     """
 <div style='text-align:center; padding:120px 20px; color:#9ca3af; border:2px dashed #e5e7eb; border-radius:14px; background:#fff;'>
   <h3 style='margin-bottom:8px;'>📄 A4 미리보기</h3>
-  <p>왼쪽에서 민원 상황을 입력하고 실행을 누르세요.<br>자동으로 법령을 확보/검증 후 공문을 작성합니다.</p>
+  <p>왼쪽에서 민원 상황을 입력하고 실행을 누르세요.<br>공문이 A4 형태로 자동 렌더링됩니다.</p>
 </div>
 """,
                     unsafe_allow_html=True,
@@ -1318,66 +1209,34 @@ def main():
             else:
                 render_a4(res["doc"], res["doc_meta"])
 
+        with tab_law:
+            if not res:
+                st.info("결과가 아직 없습니다. 왼쪽에서 실행하세요.")
+            else:
+                ui_law_browser(res.get("case", {}), res.get("candidates", []))
+                ui_law_viewer()
+
+        with tab_case:
+            ui_case_examples()
+
         with tab_debug:
-            res = st.session_state.get("result")
             if not res:
                 st.info("결과가 아직 없습니다.")
             else:
                 st.success(f"DB 저장: {res.get('db_msg','')}")
-                st.markdown("## 1) 구조화된 민원(사실관계)")
+                st.markdown("### 1) 구조화된 케이스(case)")
                 st.json(res.get("case", {}))
 
-                st.markdown("## 2) 법적 근거(정리본)")
-                render_law(res.get("law", {}))
+                st.markdown("### 2) 자동선택(참고용) best_law")
+                st.json(res.get("best_law", {}))
 
-                st.markdown("## 3) 처리 전략")
-                st.markdown(res.get("strategy", ""))
+                st.markdown("### 3) 전략(strategy)")
+                st.markdown(res.get("strategy",""))
 
-                st.markdown("## 4) 네이버 참고(옵션)")
-                ev = res.get("ev_items", [])
-                if not ev:
-                    st.caption("참고자료 없음(키/요청 제한/네이버 API 미설정 가능).")
-                for item in ev:
-                    title = clean_text(item.get("title"))
-                    desc = clean_text(item.get("desc"))
-                    link = clean_text(item.get("link"))
-                    if link:
-                        st.markdown(
-                            f"<div class='ev-card'><div class='ev-title'><a href='{link}' target='_blank'>{escape(title)}</a></div><div class='ev-desc'>{escape(desc)}</div></div>",
-                            unsafe_allow_html=True
-                        )
-                    else:
-                        st.markdown(
-                            f"<div class='ev-card'><div class='ev-title'>{escape(title)}</div><div class='ev-desc'>{escape(desc)}</div></div>",
-                            unsafe_allow_html=True
-                        )
-
-                with st.expander("🛠️ 법령 후보 루프 디버그", expanded=False):
-                    st.json(res.get("loop_debug", []))
-
-        with tab_history:
-            if not db.enabled():
-                st.info("Supabase 미연결입니다(secrets.toml 확인).")
-            else:
-                detail = st.session_state.get("history_detail")
-                if not detail:
-                    st.caption("왼쪽 히스토리에서 실행 기록을 선택 후 '불러오기'를 누르세요.")
-                else:
-                    st.markdown("### runs row")
-                    st.json(detail)
-
-                    arts = detail.get("_artifacts", [])
-                    st.markdown("### artifacts")
-                    if not arts:
-                        st.caption("artifacts 없음")
-                    else:
-                        # kind별 보기
-                        kinds = list(dict.fromkeys([a.get("kind") for a in arts if a.get("kind")]))
-                        ksel = st.selectbox("artifact kind", kinds)
-                        for a in arts:
-                            if a.get("kind") == ksel:
-                                st.code(a.get("content", "")[:12000], language="text")
+                st.markdown("### 4) 법령 후보 루프 디버그(loop_debug)")
+                st.json(res.get("loop_debug", []))
 
 
 if __name__ == "__main__":
     main()
+```0
