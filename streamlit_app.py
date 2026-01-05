@@ -9,7 +9,7 @@
 
 import streamlit as st
 import streamlit.components.v1 as components
-
+import google.generativeai as genai
 import json
 import re
 import time
@@ -277,101 +277,77 @@ def metrics_add(model_name: str, tokens_total: Optional[int] = None):
 # 5) LLM Service (Dual Router)
 # =========================
 class LLMService:
+    """
+    [Model Hierarchy]
+    1. Gemini 2.5 Flash
+    2. Gemini 2.5 Flash Lite
+    3. Gemini 2.0 Flash
+    4. Groq (Llama 3 Backup)
+    """
     def __init__(self):
-        g = st.secrets.get("general", {})
-        self.groq_key = g.get("GROQ_API_KEY")
-        self.model_fast = g.get("GROQ_MODEL_FAST", "qwen/qwen3-32b")
-        self.model_strict = g.get("GROQ_MODEL_STRICT", "llama-3.3-70b-versatile")
-        self.client = None
-        self.last_model = "N/A"
+        self.gemini_key = st.secrets["general"].get("GEMINI_API_KEY")
+        self.groq_key = st.secrets["general"].get("GROQ_API_KEY")
+        
+        # [선생님 요청사항] 모델 리스트 원상복구 (2.5 포함)
+        self.gemini_models = [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash"
+        ]
+        
+        if self.gemini_key:
+            genai.configure(api_key=self.gemini_key)
+            
+        self.groq_client = Groq(api_key=self.groq_key) if self.groq_key else None
 
-        if Groq and self.groq_key:
+    def _try_gemini(self, prompt, is_json=False, schema=None):
+        for model_name in self.gemini_models:
             try:
-                self.client = Groq(api_key=self.groq_key)
+                # 모델 호출 (대소문자 이슈 방지 위해 lower 처리 등은 상황에 맞게)
+                model = genai.GenerativeModel(model_name)
+                config = genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema=schema
+                ) if is_json else None
+                
+                res = model.generate_content(prompt, generation_config=config)
+                return res.text, model_name
             except Exception:
-                self.client = None
+                continue # 다음 모델 시도
+        raise Exception("All Gemini models failed")
 
-    def _chat(self, model: str, messages, temp: float, json_mode: bool):
-        if not self.client:
-            raise RuntimeError("Groq client not ready (missing key/lib).")
-
-        kwargs = {"model": model, "messages": messages, "temperature": temp}
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-
-        resp = self.client.chat.completions.create(**kwargs)
-        self.last_model = model
-
-        tokens_total = None
+    def generate_text(self, prompt):
         try:
-            usage = getattr(resp, "usage", None)
-            if usage:
-                tokens_total = getattr(usage, "total_tokens", None)
+            text, model_used = self._try_gemini(prompt, is_json=False)
+            return text
         except Exception:
-            tokens_total = None
+            if self.groq_client:
+                return self._generate_groq(prompt)
+            return "시스템 오류: AI 모델 연결 실패"
 
-        metrics_add(model, tokens_total=tokens_total)
-        return resp.choices[0].message.content or ""
-
-    def _parse_json(self, text: str) -> Dict[str, Any]:
-        text = strip_pua(text or "")
+    def generate_json(self, prompt, schema=None):
         try:
+            text, model_used = self._try_gemini(prompt, is_json=True, schema=schema)
             return json.loads(text)
         except Exception:
-            cleaned = re.sub(r"```json|```", "", text).strip()
-            m = re.search(r"\{.*\}", cleaned, re.DOTALL)
-            if m:
-                try:
-                    return json.loads(m.group(0))
-                except Exception:
-                    return {}
-            return {}
-
-    def generate_text(self, prompt: str, prefer: str = "fast", temp: float = 0.1) -> str:
-        if not self.client:
-            return "Groq API Key가 없거나 라이브러리 미설치"
-        model_first = self.model_fast if prefer == "fast" else self.model_strict
-        messages = [
-            {"role": "system", "content": "You are a Korean public-administration assistant. Be factual, structured, practical."},
-            {"role": "user", "content": strip_pua(prompt)},
-        ]
-        try:
-            return strip_pua(self._chat(model_first, messages, temp, json_mode=False))
-        except Exception:
-            if prefer == "fast":
-                try:
-                    return strip_pua(self._chat(self.model_strict, messages, temp, json_mode=False))
-                except Exception as e2:
-                    return f"LLM Error: {e2}"
-            return "LLM Error"
-
-    def generate_json(self, prompt: str, prefer: str = "fast", temp: float = 0.1, max_retry: int = 2) -> Dict[str, Any]:
-        if not self.client:
-            return {}
-        sys_json = "Output JSON only. No markdown. No explanation. Follow the schema exactly."
-        messages = [
-            {"role": "system", "content": sys_json},
-            {"role": "user", "content": strip_pua(prompt)},
-        ]
-        model_first = self.model_fast if prefer == "fast" else self.model_strict
-
-        for _ in range(max_retry):
+            # Fallback for Groq or Gemini without JSON mode
+            text = self.generate_text(prompt + "\n\nOutput strictly in JSON.")
             try:
-                txt = self._chat(model_first, messages, temp, json_mode=True)
-                js = self._parse_json(txt)
-                if js:
-                    return js
-            except Exception:
-                pass
+                match = re.search(r'\{.*\}', text, re.DOTALL)
+                return json.loads(match.group(0)) if match else None
+            except:
+                return None
 
+    def _generate_groq(self, prompt):
         try:
-            txt = self._chat(self.model_strict, messages, temp, json_mode=True)
-            js = self._parse_json(txt)
-            return js if js else {}
-        except Exception:
-            return {}
-
-llm = LLMService()
+            completion = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1
+            )
+            return completion.choices[0].message.content
+        except:
+            return "System Error"
 
 
 # =========================
