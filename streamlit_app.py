@@ -1,5 +1,6 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai             # <-- 추가
+from google.genai import types       # <-- 추가
 from groq import Groq
 from supabase import create_client
 import json
