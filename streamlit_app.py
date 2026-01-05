@@ -475,145 +475,124 @@ class LawOfficialService:
 class LegalAgents:
     @staticmethod
     def researcher(situation):
-        # 1. LLM에게 어떤 법령과 몇 조가 필요한지 '키워드'만 뽑게 시킴
-        prompt_extract = f"""
-        상황: "{situation}"
-        위 상황에 적용될 가장 핵심적인 대한민국 법령명과 조문 번호(숫자)만 JSON으로 추출하시오.
-        형식: {{"law_name": "도로교통법", "article_num": 32}}
-        만약 조문 번호를 특정하기 어려우면 null로 하시오.
         """
-        try:
-            extracted = llm_service.generate_json(prompt_extract)
-            law_name = extracted.get("law_name", "도로교통법")
-            article_num = extracted.get("article_num")
-        except:
-            # 실패 시 기본값
-            law_name = "도로교통법"
-            article_num = None
-
-        # 2. 실제 국가법령정보센터 API를 찔러서 '진짜 법조문' 가져오기
-        real_law_text = law_api_service.get_law_text(law_name, article_num)
-
-        # 3. 결과 반환 (이 내용은 절대 거짓이 아님)
-        return f"📌 AI 추론 법령: {law_name} 제{article_num if article_num else '?'}조\n\n{real_law_text}"
-
-    # ... (strategist, clerk, drafter 메서드는 기존 유지) ...
-
-# 싱글톤 인스턴스 생성
-llm_service = LLMService()
-search_service = SearchService()
-db_service = DatabaseService()
-law_api_service = LawOfficialService()
-
-# ==========================================
-# 3. Domain Layer (Agents)
-# ==========================================
-class LegalAgents:
-    @staticmethod
-    def researcher(situation):
-        """
-        [하이브리드 법령 검색 시스템]
-        1단계: LLM을 통해 상황에 맞는 '법령명'과 '조문 번호'를 추출 (JSON)
-        2단계: 국가법령정보센터 API(LawOfficialService)를 호출하여 '실제 데이터' 조회
-        3단계: 
-            - API 조회 성공 시: [실제 법령] 태그와 원문 출력
-            - API 조회 실패 시: [AI 추론(가상)] 태그와 경고문, 그리고 LLM의 상세 추론 결과 출력
+        [다중 법령 하이브리드 검색 시스템]
+        1. LLM: 상황을 분석하여 전략적으로 필요한 법령/조문을 '리스트'로 추출 (최대 3개)
+           (예: 위반 조항 + 용어 정의 조항 + 과태료 부과 근거)
+        2. API: 추출된 리스트를 순회하며 실제 법령 데이터 조회
+        3. 통합: API 조회 결과와 실패 시 AI 추론 결과를 종합하여 리포트 생성
         """
         
         # =========================================================
-        # 1단계: 검색 키워드(법령명, 조번호) 추출 (JSON)
+        # 1단계: 다중 검색 키워드 추출 (JSON List)
         # =========================================================
         prompt_extract = f"""
         상황: "{situation}"
-        위 상황에 적용될 가장 핵심적인 대한민국 법령명과 조문 번호(숫자)만 JSON으로 추출하시오.
-        형식: {{"law_name": "도로교통법", "article_num": 32}}
         
-        * 주의: 
-        1. 법령명은 줄임말(예: 도교법)을 쓰지 말고 정식 명칭(예: 도로교통법)을 쓰시오.
-        2. 조문 번호를 특정하기 어려우면 article_num은 null로 하시오.
+        위 민원 처리를 위해 법적 근거로 삼아야 할 핵심 대한민국 법령과 조문 번호를 
+        **중요도 순으로 최대 3개까지** JSON 리스트로 추출하시오.
+        
+        [추출 전략 가이드]
+        1. 핵심 위반 조항 (예: 주정차 금지)
+        2. 반박을 위한 정의 조항 (예: '보도'의 정의, 민원인이 우길 경우 대비)
+        3. 처벌/과태료 근거 조항
+        
+        형식: [{{"law_name": "도로교통법", "article_num": 32}}, {{"law_name": "도로교통법", "article_num": 2}}, ...]
+        * 법령명은 정식 명칭 사용. 조문 번호 불명확하면 null.
         """
         
-        law_name = "도로교통법" # 기본값
-        article_num = None
-
+        search_targets = []
         try:
+            # 리스트 형태의 JSON 파싱
             extracted = llm_service.generate_json(prompt_extract)
-            if extracted:
-                law_name = extracted.get("law_name", law_name)
-                article_num = extracted.get("article_num")
+            if isinstance(extracted, list):
+                search_targets = extracted
+            elif isinstance(extracted, dict): # 혹시 하나만 줄 경우 리스트로 변환
+                search_targets = [extracted]
         except Exception:
-            pass # 추출 실패 시 기본값으로 진행
+            # 실패 시 기본값 설정
+            search_targets = [{"law_name": "도로교통법", "article_num": None}]
+
+        if not search_targets:
+            search_targets = [{"law_name": "도로교통법", "article_num": None}]
 
         # =========================================================
-        # 2단계: 국가법령정보센터 API 호출 (Fact Check)
+        # 2단계: API 순회 호출 및 결과 수집
         # =========================================================
-        # law_api_service는 위에서 정의한 인스턴스를 사용한다고 가정
-        real_law_text = law_api_service.get_law_text(law_name, article_num)
+        report_lines = []
+        api_success_count = 0
         
-        # API 호출이 성공했는지 판단하는 로직
-        # (LawOfficialService가 에러 시 "오류", "없습니다", "설정되지" 등의 문구를 포함한다고 가정)
-        is_api_success = True
-        error_keywords = ["검색 결과가 없습니다", "오류", "API ID", "실패"]
-        
-        if any(keyword in real_law_text for keyword in error_keywords):
-            is_api_success = False
+        report_lines.append(f"🔍 **AI가 식별한 핵심 법령 ({len(search_targets)}건)**")
+        report_lines.append("---")
+
+        for idx, item in enumerate(search_targets):
+            law_name = item.get("law_name", "관련법령")
+            article_num = item.get("article_num")
+            
+            # API 호출
+            real_law_text = law_api_service.get_law_text(law_name, article_num)
+            
+            # API 성공 여부 판단 (에러 키워드 체크)
+            error_keywords = ["검색 결과가 없습니다", "오류", "API ID", "실패"]
+            is_success = not any(k in real_law_text for k in error_keywords)
+            
+            if is_success:
+                api_success_count += 1
+                header = f"✅ **{idx+1}. {law_name} 제{article_num}조 (확인됨)**"
+                content = real_law_text
+            else:
+                header = f"⚠️ **{idx+1}. {law_name} 제{article_num}조 (API 조회 실패)**"
+                content = "(국가법령정보센터에서 해당 조문을 찾지 못했습니다. 법령명이 정확한지 확인이 필요합니다.)"
+            
+            report_lines.append(f"{header}\n{content}\n")
 
         # =========================================================
-        # 3단계: 결과 분기 처리 (Success vs Fallback)
+        # 3단계: 결과 종합 (Fallback 로직 포함)
         # =========================================================
         
-        if is_api_success:
-            # [Case A] 실제 법령 찾기 성공
-            return f"""📌 **[실제 법령 데이터]**
-국가법령정보센터 API를 통해 검증된 정보입니다.
+        final_report = "\n".join(report_lines)
 
-{real_law_text}"""
-
-        else:
-            # [Case B] API 실패 -> AI 추론 모드 가동 (기존 Prompt 활용)
+        # 만약 API가 단 하나도 성공하지 못했다면 -> 전면 AI 추론(가상) 모드 가동
+        if api_success_count == 0:
             prompt_fallback = f"""
-            Role: 당신은 대한민국 최고의 행정 법률 전문가입니다.
-            Task: 아래 상황에 적용될 법령명과 조항 번호를 정확히 찾아 설명하세요.
-
-            [출력 제약사항 - 매우 중요]
-            1. 당신이 누구인지 절대 말하지 마세요.
-            2. 인삿말 없이, **바로 법령명과 내용부터** 출력하세요.
-            3. 말투는 정중하고 건조한 행정보고서 스타일을 유지하세요.
-            
-            <instruction>
+            Role: 행정 법률 전문가
+            Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
             상황: "{situation}"
-            위 상황에 적용할 가장 정확한 '법령명'과 '관련 조항'을 하나만 찾으시오.
-            반드시 현행 대한민국 법령이어야 하며, 조항 번호까지 명시하세요.
-            (예: 도로교통법 제32조(정차 및 주차의 금지))
             
-            *주의: 입력에 실명 등 개인정보가 있다면 마스킹하여 처리하세요.
-            </instruction>
+            * 경고: 현재 외부 법령 API 연결이 원활하지 않습니다. 
+            당신이 알고 있는 지식을 바탕으로 가장 정확한 법령 정보를 작성하되,
+            반드시 상단에 [AI 추론 결과]임을 명시하고 환각 가능성을 경고하시오.
             """
+            ai_fallback_text = llm_service.generate_text(prompt_fallback).strip()
             
-            ai_generated_text = llm_service.generate_text(prompt_fallback).strip()
-            
-            return f"""⚠️ **[AI 추론 - 가상 결과]**
-(국가법령정보센터에서 정확한 조문을 찾지 못하여 AI가 추론한 내용입니다. **환각(Hallucination)** 가능성이 있으므로 반드시 법제처에서 재확인하시기 바랍니다.)
+            return f"""⚠️ **[시스템 경고: API 조회 실패]**
+(국가법령정보센터 연결에 실패하여 AI의 지식 기반으로 답변을 생성합니다. **환각(Hallucination)** 가능성이 있으므로 법제처 확인이 필수입니다.)
 
 --------------------------------------------------
-{ai_generated_text}"""
+{ai_fallback_text}"""
+        
+        # 하나라도 성공했다면 API 리포트 반환
+        return final_report
 
+    # ... (strategist, clerk, drafter 등 다른 메서드는 기존 그대로 유지) ...
     @staticmethod
     def strategist(situation, legal_basis, search_results):
-        # (기존 코드 유지)
         prompt = f"""
 당신은 행정 업무 베테랑 '주무관'입니다.
 
 [민원 상황]: {situation}
-[법적 근거]: {legal_basis}
+[확보된 법적 근거]: 
+{legal_basis}
+
 [유사 사례/판례]: {search_results}
 
 위 정보를 종합하여 이 민원을 처리하기 위한 **대략적인 업무 처리 방향(Strategy)**을 수립하세요.
+특히 [확보된 법적 근거]에 여러 조항(위반조항, 정의조항 등)이 있다면 이를 논리적으로 연결하여 방어 논리를 구성하세요.
 
 다음 3가지 항목을 포함하여 마크다운으로 작성하세요:
-1. **처리 방향**: (예: 강경 대응, 계도 위주, 반려 등)
+1. **처리 방향**: (예: '제2조 정의 규정에 의거하여 보도임을 명확히 하고, 제32조 위반으로 단속 유지')
 2. **핵심 주의사항**: (절차상 놓치면 안 되는 것, 법적 쟁점)
-3. **예상 반발 및 대응**: (민원인이 항의할 경우 대응 논리)
+3. **예상 반발 및 대응**: (민원인이 "여기가 무슨 인도냐"라고 항의할 경우 대응 논리)
 
 간결하고 명확하게 작성하세요.
 """
@@ -621,7 +600,6 @@ class LegalAgents:
 
     @staticmethod
     def clerk(situation, legal_basis):
-        # (기존 코드 유지)
         today = datetime.now()
         prompt = f"""
 오늘: {today.strftime('%Y-%m-%d')}
@@ -647,7 +625,6 @@ class LegalAgents:
 
     @staticmethod
     def drafter(situation, legal_basis, meta_info, strategy):
-        # (기존 코드 유지)
         doc_schema = {
             "type": "OBJECT",
             "properties": {
@@ -672,13 +649,12 @@ class LegalAgents:
 {strategy}
 
 [작성 원칙]
-1. 위 '업무 처리 가이드라인'의 기조를 반영하여 어조를 결정하세요.
+1. 위 '업무 처리 가이드라인'의 논리를 본문에 녹여내세요. (법 조항 인용 필수)
 2. 수신인이 불명확하면 상황에 맞춰 추론하세요.
-3. 본문 구조: [경위] -> [근거] -> [처분 내용] -> [권리구제 절차]
+3. 본문 구조: [문서의 목적/경위] -> [법적 근거(정의 및 위반조항)] -> [처분 내용] -> [이의제기 절차]
 4. 개인정보(이름, 번호)는 반드시 마스킹('OOO') 처리하세요.
 """
-        return llm_service.generate_json(prompt, schema=doc_schema)
-# ==========================================
+        return llm_service.generate_json(prompt, schema=doc_schema)# ==========================================
 # 4. Workflow (UI 로직)
 # ==========================================
 def run_workflow(user_input):
