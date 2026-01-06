@@ -395,7 +395,9 @@ Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
 [유사 사례/판례]: {search_results}
 
 위 정보를 종합하여 이 민원을 처리하기 위한 **대략적인 업무 처리 방향(Strategy)**을 수립하세요.
-
+**[중요] 서론(인사말, 공감 표현, "네, 알겠습니다" 등)을 절대 작성하지 마십시오.**
+바로 1. 처리 방향부터 간결한 개조식(bullet point)으로 작성하세요.
+    
 다음 3가지 항목 포함:
 1. 처리 방향
 2. 핵심 주의사항
@@ -628,10 +630,8 @@ def main():
                     )
 
             # ---------------------------------------------------------
-            # 3. 전략 섹션 (3단 세로 배치, 볼드체 지원)
+            # 3. 전략 섹션 (줄 간격 축소 + AI 사족 제거 + 3단 배치)
             # ---------------------------------------------------------
-            # [주의] 이 with 구문은 위의 col1/col2 expander와 같은 레벨(형제)로 배치했습니다.
-            # 만약 법령/뉴스 박스 안으로 넣고 싶다면 전체를 선택해 들여쓰기(Tab) 하세요.
             with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
                 raw_strategy = res["strategy"]
 
@@ -651,34 +651,42 @@ def main():
 
                 if not direction_text: direction_text = raw_strategy
 
-                def fix_bold(text):
-                    return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+                # [핵심] 줄 간격/볼드체/사족 처리 함수
+                def clean_text(text):
+                    # 1. 과도한 줄바꿈 제거 (빈 줄 압축)
+                    text = re.sub(r'\n\s*\n', '\n', text)
+                    # 2. 볼드체 변환
+                    text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+                    # 3. 혹시 모를 AI 사족(인사말) 제거 시도 (선택 사항)
+                    # 문장이 '네,' '하지만' 등으로 시작하고 길이가 짧으면 제거하는 로직 등을 추가할 수 있으나,
+                    # 1단계(프롬프트) 수정이 가장 확실하므로 여기서는 줄바꿈 처리만 집중합니다.
+                    return text
 
-                final_dir = fix_bold(direction_text)
-                final_caution = fix_bold(caution_text)
-                final_rebuttal = fix_bold(rebuttal_text)
+                final_dir = clean_text(direction_text)
+                final_caution = clean_text(caution_text)
+                final_rebuttal = clean_text(rebuttal_text)
 
                 # 🔵 1. 처리 방향
                 st.markdown(f"""
-                <div style="background-color: #eff6ff; border-left: 5px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #1e40af; margin-top: 0; margin-bottom: 10px; font-size: 1.1rem;">🚀 업무 처리 방향 (Action Plan)</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #334155; white-space: pre-wrap;">{final_dir}</div>
+                <div style="background-color: #eff6ff; border-left: 5px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                    <h4 style="color: #1e40af; margin-top: 0; margin-bottom: 8px; font-size: 1.1rem;">🚀 업무 처리 방향 (Action Plan)</h4>
+                    <div style="font-size: 0.95rem; line-height: 1.45; color: #334155; white-space: pre-wrap;">{final_dir}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
                 # 🟡 2. 핵심 주의사항
                 st.markdown(f"""
-                <div style="background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #92400e; margin-top: 0; margin-bottom: 10px; font-size: 1.05rem;">⚠️ 핵심 주의사항</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #451a03; white-space: pre-wrap;">{final_caution}</div>
+                <div style="background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                    <h4 style="color: #92400e; margin-top: 0; margin-bottom: 8px; font-size: 1.05rem;">⚠️ 핵심 주의사항</h4>
+                    <div style="font-size: 0.95rem; line-height: 1.45; color: #451a03; white-space: pre-wrap;">{final_caution}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
                 # 🔴 3. 예상 반발 및 대응
                 st.markdown(f"""
-                <div style="background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 20px; border-radius: 8px; margin-bottom: 0px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #991b1b; margin-top: 0; margin-bottom: 10px; font-size: 1.05rem;">🛡️ 예상 반발 및 대응</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
+                <div style="background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 20px; border-radius: 8px; margin-bottom: 0px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                    <h4 style="color: #991b1b; margin-top: 0; margin-bottom: 8px; font-size: 1.05rem;">🛡️ 예상 반발 및 대응</h4>
+                    <div style="font-size: 0.95rem; line-height: 1.45; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
                 </div>
                 """, unsafe_allow_html=True)
     with col_right:
