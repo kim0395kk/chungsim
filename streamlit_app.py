@@ -191,6 +191,40 @@ class SearchService:
         except Exception as e:
             return f"검색 중 오류: {str(e)}"
 
+
+class DatabaseService:
+    """Supabase Persistence Layer"""
+    def __init__(self):
+        try:
+            self.url = st.secrets["supabase"]["SUPABASE_URL"]
+            self.key = st.secrets["supabase"]["SUPABASE_KEY"]
+            self.client = create_client(self.url, self.key)
+            self.is_active = True
+        except Exception:
+            self.is_active = False
+
+    def save_log(self, user_input, legal_basis, strategy, doc_data):
+        if not self.is_active:
+            return "DB 미연결 (저장 건너뜀)"
+
+        try:
+            final_summary_content = {
+                "strategy": strategy,
+                "document_content": doc_data,
+            }
+
+            data = {
+                "situation": user_input,
+                "law_name": legal_basis,
+                "summary": json.dumps(final_summary_content, ensure_ascii=False),
+            }
+
+            self.client.table("law_reports").insert(data).execute()
+            return "DB 저장 성공"
+        except Exception as e:
+            return f"DB 저장 실패: {e}"
+
+
 class LawOfficialService:
     """
     국가법령정보센터(law.go.kr) 공식 API 연동
