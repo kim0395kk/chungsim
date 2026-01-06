@@ -621,6 +621,63 @@ def main():
                         """,
                         unsafe_allow_html=True
                     )
+                # ---------------------------------------------------------
+            # ▼▼▼ 여기부터 붙여넣으세요 (이전 expander와 같은 들여쓰기 레벨) ▼▼▼
+            # ---------------------------------------------------------
+            with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
+                raw_strategy = res["strategy"]
+
+                # [1] 텍스트 파싱
+                direction_text = ""
+                caution_text = ""
+                rebuttal_text = ""
+
+                # 정규식으로 섹션 추출
+                match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
+                if match_dir: direction_text = match_dir.group(1).strip()
+                
+                match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
+                if match_caution: caution_text = match_caution.group(1).strip()
+                
+                match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
+                if match_rebuttal: rebuttal_text = match_rebuttal.group(1).strip()
+
+                if not direction_text: direction_text = raw_strategy
+
+                # [2] UI 렌더링 (3색 대시보드)
+                
+                # 🔵 처리 방향
+                st.markdown(f"""
+                <div style="background-color: #eff6ff; border-left: 5px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <h4 style="color: #1e40af; margin-top: 0; margin-bottom: 10px; display: flex; align-items: center; font-size: 1.1rem;">
+                        <span style="margin-right: 8px;">🚀</span> 업무 처리 방향 (Action Plan)
+                    </h4>
+                    <div style="font-size: 0.95rem; line-height: 1.6; color: #334155; white-space: pre-wrap;">{_escape(direction_text)}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # 🟡🔴 주의사항 & 대응
+                col_caution, col_defense = st.columns(2)
+                
+                with col_caution:
+                    st.markdown(f"""
+                    <div style="background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 8px; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                        <h4 style="color: #92400e; margin-top: 0; margin-bottom: 10px; display: flex; align-items: center; font-size: 1.05rem;">
+                            <span style="margin-right: 8px;">⚠️</span> 핵심 주의사항
+                        </h4>
+                        <div style="font-size: 0.9rem; line-height: 1.6; color: #451a03; white-space: pre-wrap;">{_escape(caution_text)}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                with col_defense:
+                    st.markdown(f"""
+                    <div style="background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 20px; border-radius: 8px; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                        <h4 style="color: #991b1b; margin-top: 0; margin-bottom: 10px; display: flex; align-items: center; font-size: 1.05rem;">
+                            <span style="margin-right: 8px;">🛡️</span> 예상 반발 및 대응
+                        </h4>
+                        <div style="font-size: 0.9rem; line-height: 1.6; color: #7f1d1d; white-space: pre-wrap;">{_escape(rebuttal_text)}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
