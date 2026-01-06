@@ -627,44 +627,44 @@ def main():
             # ---------------------------------------------------------
             # 3. 전략 섹션 (3단 세로 배치, 볼드체 지원)
             # ---------------------------------------------------------
-with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
-    raw_strategy = res["strategy"]
+            with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
+                raw_strategy = res["strategy"]
 
-    # 텍스트 파싱
-    direction_text = ""
-    caution_text = ""
-    rebuttal_text = ""
+                # 텍스트 파싱
+                direction_text = ""
+                caution_text = ""
+                rebuttal_text = ""
 
-    match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
-    if match_dir:
-        direction_text = match_dir.group(1).strip()
+                match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
+                if match_dir:
+                    direction_text = match_dir.group(1).strip()
 
-    match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
-    if match_caution:
-        caution_text = match_caution.group(1).strip()
+                match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
+                if match_caution:
+                    caution_text = match_caution.group(1).strip()
 
-    match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
-    if match_rebuttal:
-        rebuttal_text = match_rebuttal.group(1).strip()
+                match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
+                if match_rebuttal:
+                    rebuttal_text = match_rebuttal.group(1).strip()
 
-    if not direction_text:
-        direction_text = raw_strategy
+                if not direction_text:
+                    direction_text = raw_strategy
 
-    def fix_bold(text: str) -> str:
-        return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text or "")
+                def fix_bold(text: str) -> str:
+                    return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text or "")
 
-    # 섹션을 한 덩어리로 합치기
-    combined = ""
-    combined += "<b>1. 처리 방향</b>\n" + (direction_text or "").strip() + "\n\n"
-    if caution_text:
-        combined += "<b>2. 핵심 주의사항</b>\n" + caution_text.strip() + "\n\n"
-    if rebuttal_text:
-        combined += "<b>3. 예상 반발 및 대응</b>\n" + rebuttal_text.strip()
+                # 섹션을 한 덩어리로 합치기
+                combined = ""
+                combined += "<b>1. 처리 방향</b>\n" + (direction_text or "").strip() + "\n\n"
+                if caution_text:
+                    combined += "<b>2. 핵심 주의사항</b>\n" + caution_text.strip() + "\n\n"
+                if rebuttal_text:
+                    combined += "<b>3. 예상 반발 및 대응</b>\n" + rebuttal_text.strip()
 
-    combined = fix_bold(combined)
+                combined = fix_bold(combined)
 
-    st.markdown(
-        f"""
+                st.markdown(
+                    f"""
 <div style="
   background:#ffffff;
   border: 1px solid #e5e7eb;
@@ -680,8 +680,8 @@ with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
 {combined}
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+                    unsafe_allow_html=True,
+                )
 
 
     with col_right:
