@@ -546,45 +546,81 @@ def main():
             else:
                 st.error(f"❌ {res['save_msg']}")
 
+            # ▼ 들여쓰기 레벨 1 (if "workflow_result" 내부)
             with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
+                # ▼ 들여쓰기 레벨 2 (expander 내부)
                 col1, col2 = st.columns(2)
+                
+                # ---------------------------------------------------------
+                # 1. 좌측: 적용 법령
+                # ---------------------------------------------------------
                 with col1:
                     st.markdown("**📜 적용 법령**")
-    
-    # [1] 텍스트 후처리 (깨진 문자 복구 & 마크다운 -> HTML 변환)
-    raw_law = res["law"]
-    # 1. 특수문자 복구 (&lt; -> <)
-    cleaned_law = raw_law.replace("&lt;", "<").replace("&gt;", ">")
-    # 2. 마크다운 볼드(**)를 HTML 볼드(<b>)로 변환
-    cleaned_law = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned_law)
-    
-    # [2] 스타일 적용하여 출력
-    st.markdown(
-        f"""
-<div style="
-  max-height: 400px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  padding: 15px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  background: #f8fafc;
-  font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
-  font-size: 0.95rem;
-  line-height: 1.6;
-  color: #334155;
-">{cleaned_law}</div>
-""",
-        unsafe_allow_html=Tru
-    )
+                    
+                    raw_law = res["law"]
+                    # [1] 특수문자 및 마크다운 깨짐 복구
+                    cleaned_law = raw_law.replace("&lt;", "<").replace("&gt;", ">")
+                    cleaned_law = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned_law)
+                    
+                    # [2] 카드 스타일 적용
+                    st.markdown(
+                        f"""
+                        <div style="
+                            height: 300px;
+                            overflow-y: auto;
+                            padding: 15px;
+                            border-radius: 8px;
+                            border: 1px solid #e5e7eb;
+                            background: #f8fafc;
+                            font-family: 'Pretendard', sans-serif;
+                            font-size: 0.9rem;
+                            line-height: 1.6;
+                            color: #334155;
+                        ">
+                        {cleaned_law}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                # ---------------------------------------------------------
+                # 2. 우측: 유사 사례 (오류가 났던 부분)
+                # ---------------------------------------------------------
+                # 주의: with col2는 with col1과 정확히 같은 세로선상에 있어야 합니다.
                 with col2:
-                    st.markdown("**🟩 네이버 유사 사례**")
-                    st.info(res["search"])
+                    st.markdown("**🟩 관련 뉴스/사례**")
+                    
+                    raw_news = res["search"]
+                    
+                    # [1] 뉴스 데이터 전처리
+                    news_body = raw_news.replace("# ", "").replace("## ", "")
+                    news_html = re.sub(
+                        r'\[([^\]]+)\]\(([^)]+)\)', 
+                        r'<a href="\2" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600;">\1</a>', 
+                        news_body
+                    )
+                    news_html = news_html.replace("\n", "<br>")
 
-            with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
-                st.markdown(res["strategy"])
-
+                    # [2] 뉴스용 카드 스타일
+                    st.markdown(
+                        f"""
+                        <div style="
+                            height: 300px;
+                            overflow-y: auto;
+                            padding: 15px;
+                            border-radius: 8px;
+                            border: 1px solid #dbeafe;
+                            background: #eff6ff;
+                            font-family: 'Pretendard', sans-serif;
+                            font-size: 0.9rem;
+                            line-height: 1.6;
+                            color: #1e3a8a;
+                        ">
+                        {news_html}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
