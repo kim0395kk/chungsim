@@ -630,56 +630,74 @@ def main():
                     )
 
 # ---------------------------------------------------------
-            # 3. 전략 섹션 (디자인 업그레이드: 아이콘 리스트 & 말풍선 UI)
+            # 3. 전략 섹션 (파싱 강화 & 디자인 업그레이드)
             # ---------------------------------------------------------
             with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
                 strat = res["strategy"]
                 
-                # [1] 파싱 로직 (기존과 동일)
+                # [1] 파싱 로직 (특수문자/마크다운 무시하고 숫자만 추적)
                 def parse_strategy(text):
                     try:
-                        text = "\n" + text
-                        s1 = re.search(r'\n\s*1\.', text); s2 = re.search(r'\n\s*2\.', text); s3 = re.search(r'\n\s*3\.', text)
+                        # 정규식 설명:
+                        # (?:^|\n) -> 문장의 시작이거나 줄바꿈 직후
+                        # \s* -> 공백이 있거나 없거나
+                        # (?:#+|\*\*|\[)? -> #, **, [ 같은 마크다운 기호가 있어도 무시
+                        # \s* -> 공백
+                        # 1\. -> 숫자 1과 점(.)
+                        
+                        pattern_1 = r'(?:^|\n)\s*(?:#+|\*\*|\[)?\s*1\.'
+                        pattern_2 = r'(?:^|\n)\s*(?:#+|\*\*|\[)?\s*2\.'
+                        pattern_3 = r'(?:^|\n)\s*(?:#+|\*\*|\[)?\s*3\.'
+
+                        s1 = re.search(pattern_1, text)
+                        s2 = re.search(pattern_2, text)
+                        s3 = re.search(pattern_3, text)
+                        
                         idx1 = s1.start() if s1 else 0
                         idx2 = s2.start() if s2 else len(text)
                         idx3 = s3.start() if s3 else len(text)
                         
-                        def clean(t): return re.sub(r'^\s*\d+\..*?\n', '', t.strip(), flags=re.DOTALL).strip()
-                        p1 = clean(text[idx1:idx2]) if s1 else text
-                        p2 = clean(text[idx2:idx3]) if s2 else ""
-                        p3 = clean(text[idx3:]) if s3 else ""
+                        # 인덱스 정렬 (순서 꼬임 방지)
+                        indices = sorted([idx1, idx2, idx3, len(text)])
+                        
+                        # 섹션별 텍스트 자르기 & 제목 줄 제거 함수
+                        def clean_section(t):
+                            # 첫 줄(제목 줄) 제거: "1. 처리방향" 같은 라인을 지움
+                            return re.sub(r'^\s*(?:#+|\*\*|\[)?\s*\d+\..*?(?:\n|$)', '', t.strip(), flags=re.DOTALL).strip()
+
+                        # 순서대로 할당 (s1, s2가 존재할 때만 자름)
+                        p1 = clean_section(text[idx1:idx2]) if s1 else text
+                        p2 = clean_section(text[idx2:idx3]) if s2 else ""
+                        p3 = clean_section(text[idx3:]) if s3 else ""
+                        
                         return p1, p2, p3
-                    except: return text, "", ""
+                    except:
+                        return text, "", ""
 
                 t1, t2, t3 = parse_strategy(strat)
 
                 # [2] 디자인 렌더링 함수들
 
-                # 🔹 공통 텍스트 정리 (볼드체 변환)
                 def fmt(t): 
                     return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", t)
 
-                # 🔹 리스트 스타일링 (체크리스트 변환)
                 def style_list(text, icon="✔", color="#334155"):
-                    # 줄바꿈이나 * - 등으로 시작하는 문장을 찾아서 리스트화
                     lines = text.split('\n')
                     html = ""
                     for line in lines:
                         line = line.strip()
                         if not line: continue
-                        # 기호 제거
-                        clean_line = re.sub(r'^[\*\-]\s*', '', line)
+                        # 특수문자(*, -, #) 제거
+                        clean_line = re.sub(r'^[\*\-\#]\s*', '', line)
                         clean_line = fmt(clean_line)
                         html += f"""
                         <div style="display:flex; align-items:start; margin-bottom:8px;">
-                            <span style="margin-right:10px; color:{color}; font-weight:bold;">{icon}</span>
+                            <span style="margin-right:10px; color:{color}; font-weight:bold; flex-shrink:0;">{icon}</span>
                             <span style="line-height:1.5;">{clean_line}</span>
                         </div>"""
                     return html
 
-                # 🔹 대화형 스타일링 (반발 vs 대응)
                 def style_chat(text):
-                    # '반발:' 과 '대응:' 을 찾아서 스타일링
                     lines = text.split('\n')
                     html = ""
                     for line in lines:
@@ -687,29 +705,37 @@ def main():
                         if not line: continue
                         line = fmt(line)
                         
-                        # 반발 (Q)
-                        if "반발" in line or "질문" in line:
-                            clean = re.sub(r'^[\*\-]\s*', '', line).replace("예상 반발:", "").replace("반발:", "")
+                        if "반발" in line or "질문" in line or "민원인" in line:
+                            # 민원인 멘트 정제
+                            clean = re.sub(r'^[\*\-\#]\s*', '', line)
+                            clean = re.sub(r'(예상 )?반발( \d)?[:\.]?', '', clean).strip()
+                            clean = clean.replace('"', '') # 따옴표 제거 (스타일로 처리)
+                            
                             html += f"""
-                            <div style="margin-top:12px; margin-bottom:4px;">
-                                <span style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:4px; font-size:0.8rem; font-weight:bold; border:1px solid #fecaca;">💢 민원인 주장</span>
-                                <div style="margin-top:4px; font-weight:bold; color:#7f1d1d; font-size:0.95rem;">"{clean.strip()}"</div>
+                            <div style="margin-top:15px; margin-bottom:5px;">
+                                <span style="background:#fee2e2; color:#991b1b; padding:4px 8px; border-radius:6px; font-size:0.8rem; font-weight:bold; border:1px solid #fecaca;">💢 민원인 주장</span>
+                                <div style="margin-top:6px; font-weight:bold; color:#7f1d1d; font-size:0.95rem; padding-left:4px;">"{clean}"</div>
                             </div>"""
-                        # 대응 (A)
-                        elif "대응" in line:
-                            clean = re.sub(r'^[\*\-]\s*', '', line).replace("대응:", "")
+                        
+                        elif "대응" in line or "답변" in line:
+                            # 공무원 대응 멘트 정제
+                            clean = re.sub(r'^[\*\-\#]\s*', '', line)
+                            clean = re.sub(r'대응[:\.]?', '', clean).strip()
+                            clean = clean.replace('"', '')
+                            
                             html += f"""
-                            <div style="margin-bottom:12px; padding:10px; background:rgba(255,255,255,0.6); border-left:3px solid #ef4444; border-radius:0 4px 4px 0; color:#450a0a; font-size:0.9rem;">
-                                <b>📢 답변 가이드:</b> {clean.strip()}
+                            <div style="margin-bottom:15px; padding:12px; background:rgba(255,255,255,0.7); border-left:4px solid #ef4444; border-radius:0 8px 8px 0; color:#450a0a; font-size:0.9rem; line-height:1.5;">
+                                <b>📢 답변 가이드:</b><br>{clean}
                             </div>"""
-                        # 그 외 (일반 텍스트)
                         else:
-                            html += f"<div style='margin-bottom:5px; color:#7f1d1d;'>{line}</div>"
+                            # 그 외 부가 설명
+                            clean = re.sub(r'^[\*\-\#]\s*', '', line)
+                            html += f"<div style='margin-bottom:5px; color:#7f1d1d; font-size:0.9rem;'>{clean}</div>"
                     return html
 
-                # [3] 실제 UI 출력
+                # [3] UI 출력
 
-                # 🚀 1. 처리 방향 (체크리스트 스타일)
+                # 🚀 1. 처리 방향
                 st.markdown(f"""
                 <div style="background-color:#eff6ff; border:1px solid #dbeafe; border-radius:12px; padding:20px; margin-bottom:15px; box-shadow: 0 2px 5px rgba(59, 130, 246, 0.05);">
                     <h4 style="color:#1e40af; margin-top:0; margin-bottom:15px; display:flex; align-items:center;">
@@ -721,7 +747,7 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
 
-                # ⚠️ 2. 핵심 주의사항 (노트 스타일)
+                # ⚠️ 2. 핵심 주의사항
                 st.markdown(f"""
                 <div style="background-color:#fffbeb; border:1px solid #fcd34d; border-radius:12px; padding:20px; margin-bottom:15px; box-shadow: 0 2px 5px rgba(245, 158, 11, 0.05);">
                     <h4 style="color:#92400e; margin-top:0; margin-bottom:15px; display:flex; align-items:center;">
@@ -733,7 +759,7 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
 
-                # 🛡️ 3. 예상 반발 및 대응 (대화형 말풍선 스타일)
+                # 🛡️ 3. 예상 반발 및 대응
                 st.markdown(f"""
                 <div style="background-color:#fef2f2; border:1px solid #fecaca; border-radius:12px; padding:20px; box-shadow: 0 2px 5px rgba(239, 68, 68, 0.05);">
                     <h4 style="color:#991b1b; margin-top:0; margin-bottom:15px; display:flex; align-items:center;">
