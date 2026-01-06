@@ -550,7 +550,23 @@ def main():
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("**📜 적용 법령**")
-                    st.code(res["law"], language="text")
+                    st.markdown(
+        f"""
+<pre style="
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  font-family: Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.35;
+">{_escape(res["law"])}</pre>
+""",
+        unsafe_allow_html=True,
+    )
                 with col2:
                     st.markdown("**🟩 네이버 유사 사례**")
                     st.info(res["search"])
