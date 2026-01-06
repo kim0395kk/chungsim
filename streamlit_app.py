@@ -624,7 +624,7 @@ def main():
                         unsafe_allow_html=True
                     )
 
-with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
+                with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
                 raw_strategy = res["strategy"]
 
                 # 텍스트 파싱
