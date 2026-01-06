@@ -715,6 +715,7 @@ def main():
                     <div style="font-size: 0.95rem; line-height: 1.5; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
                 </div>
                 """, unsafe_allow_html=True)
+                
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
