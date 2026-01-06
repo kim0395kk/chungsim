@@ -448,7 +448,7 @@ Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
             res = (llm_service.generate_text(prompt) or "").strip()
             m = re.search(r"\d{1,3}", res)  # 1~3자리만 허용
             days = int(m.group(0)) if m else 15
-            days = max(1, min(days, 90))    # 1~90일로 강제
+            days = max(1, min(days, 180))    # 1~180일로 강제
         except Exception:
             days = 15
 
@@ -548,8 +548,8 @@ def main():
     col_left, col_right = st.columns([1, 1.2])
 
     with col_left:
-        st.title("🏢 AI 행정관 Pro")
-        st.caption("Gemini + 국가법령정보 + Naver Search + Strategy + DB")
+        st.title("🏢 AI 행정관 Pro 충주시청")
+        st.caption("문의 kim0395kk@korea.kr Gemini + 국가법령정보 + Naver Search + Strategy + DB")
         st.markdown("---")
 
         st.markdown("### 🗣️ 업무 지시")
