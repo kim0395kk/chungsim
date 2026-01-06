@@ -550,22 +550,33 @@ def main():
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("**📜 적용 법령**")
-                    st.markdown(
+    
+    # [1] 텍스트 후처리 (깨진 문자 복구 & 마크다운 -> HTML 변환)
+    raw_law = res["law"]
+    # 1. 특수문자 복구 (&lt; -> <)
+    cleaned_law = raw_law.replace("&lt;", "<").replace("&gt;", ">")
+    # 2. 마크다운 볼드(**)를 HTML 볼드(<b>)로 변환
+    cleaned_law = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned_law)
+    
+    # [2] 스타일 적용하여 출력
+    st.markdown(
         f"""
-<pre style="
+<div style="
+  max-height: 400px;
+  overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  margin: 0;
-  padding: 12px;
+  padding: 15px;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   background: #f8fafc;
-  font-family: Consolas, monospace;
-  font-size: 0.9rem;
-  line-height: 1.35;
-">{_escape(res["law"])}</pre>
+  font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #334155;
+">{cleaned_law}</div>
 """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=Tru
     )
                 with col2:
                     st.markdown("**🟩 네이버 유사 사례**")
