@@ -51,6 +51,9 @@ st.markdown(
     .log-calc { background-color: #f0fdf4; color: #166534; border-left: 4px solid #22c55e; } /* Green */
     .log-draft { background-color: #fef2f2; color: #991b1b; border-left: 4px solid #ef4444; } /* Red */
     .log-sys { background-color: #f3f4f6; color: #4b5563; border-left: 4px solid #9ca3af; } /* Gray */
+
+    /* 전략 박스 스타일 */
+    .strategy-box { background-color: #fffbeb; border: 1px solid #fcd34d; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -61,6 +64,13 @@ st.markdown(
 # ==========================================
 
 class LLMService:
+    """
+    [Model Hierarchy]
+    1. Gemini 2.5 Flash
+    2. Gemini 2.5 Flash Lite
+    3. Gemini 2.0 Flash
+    4. Groq (Llama 3 Backup)
+    """
     def __init__(self):
         self.gemini_key = st.secrets["general"].get("GEMINI_API_KEY")
         self.groq_key = st.secrets["general"].get("GROQ_API_KEY")
@@ -183,6 +193,7 @@ class SearchService:
 
 
 class DatabaseService:
+    """Supabase Persistence Layer"""
     def __init__(self):
         try:
             self.url = st.secrets["supabase"]["SUPABASE_URL"]
@@ -204,7 +215,7 @@ class DatabaseService:
 
             data = {
                 "situation": user_input,
-                "law_name": legal_basis, # String 저장
+                "law_name": legal_basis,
                 "summary": json.dumps(final_summary_content, ensure_ascii=False),
             }
 
@@ -215,6 +226,11 @@ class DatabaseService:
 
 
 class LawOfficialService:
+    """
+    국가법령정보센터(law.go.kr) 공식 API 연동
+    1. 검색: 법령명 -> 법령 ID(MST) 추출
+    2. 조회: 법령 ID -> 전체 조문 파싱 -> 특정 조문 검색
+    """
     def __init__(self):
         self.api_id = st.secrets["general"].get("LAW_API_ID")
         self.base_url = "http://www.law.go.kr/DRF/lawSearch.do"
@@ -286,7 +302,7 @@ class LawOfficialService:
 
 
 # ==========================================
-# 3. Global Service Instances
+# 3. Global Service Instances (핵심!)
 # ==========================================
 llm_service = LLMService()
 search_service = SearchService()
@@ -297,65 +313,90 @@ law_api_service = LawOfficialService()
 class LegalAgents:
     @staticmethod
     def researcher(situation):
-        # 1. LLM에게 법령 추출 요청
         prompt_extract = f"""
 상황: "{situation}"
+
 위 민원 처리를 위해 법적 근거로 삼아야 할 핵심 대한민국 법령과 조문 번호를
-JSON 리스트로 추출하시오.
-형식: [{{"law_name": "도로교통법", "article_num": 32}}, ...]
+**중요도 순으로 최대 3개까지** JSON 리스트로 추출하시오.
+
+형식: [{{"law_name": "도로교통법", "article_num": 32}}, {{"law_name": "도로교통법", "article_num": 2}}, ...]
+* 법령명은 정식 명칭 사용. 조문 번호 불명확하면 null.
 """
+
         search_targets = []
         try:
             extracted = llm_service.generate_json(prompt_extract)
-            if isinstance(extracted, list): search_targets = extracted
-            elif isinstance(extracted, dict): search_targets = [extracted]
-        except:
+            if isinstance(extracted, list):
+                search_targets = extracted
+            elif isinstance(extracted, dict):
+                search_targets = [extracted]
+        except Exception:
             search_targets = [{"law_name": "도로교통법", "article_num": None}]
-        
-        if not search_targets: search_targets = [{"law_name": "도로교통법", "article_num": None}]
 
-        # [변경점] UI용 리스트와 AI용 텍스트를 따로 준비
-        ui_data_list = []
-        full_text_for_ai = "" 
+        if not search_targets:
+            search_targets = [{"law_name": "도로교통법", "article_num": None}]
 
-        for item in search_targets:
+        report_lines = []
+        api_success_count = 0
+
+        report_lines.append(f"🔍 **AI가 식별한 핵심 법령 ({len(search_targets)}건)**")
+        report_lines.append("---")
+
+        for idx, item in enumerate(search_targets):
             law_name = item.get("law_name", "관련법령")
             article_num = item.get("article_num")
-            
-            # API 호출
-            real_law_text = law_api_service.get_law_text(law_name, article_num)
-            
-            # 성공 여부 체크
-            is_error = any(k in real_law_text for k in ["검색 결과가 없습니다", "오류", "API ID", "실패"])
-            
-            # 1) UI에 보여줄 데이터 (딕셔너리)
-            ui_data_list.append({
-                "title": f"{law_name} 제{article_num}조" if article_num else law_name,
-                "content": real_law_text,
-                "is_success": not is_error
-            })
-            
-            # 2) AI(Strategist)에게 줄 데이터 (텍스트)
-            status_icon = "⚠️" if is_error else "✅"
-            full_text_for_ai += f"{status_icon} [{law_name} 제{article_num}조]\n{real_law_text}\n\n"
 
-        # [핵심] 두 가지를 모두 반환
-        return {
-            "ui_data": ui_data_list,      # UI가 쓸 것 (리스트)
-            "full_text": full_text_for_ai # 다른 에이전트가 쓸 것 (텍스트)
-        }
+            real_law_text = law_api_service.get_law_text(law_name, article_num)
+
+            error_keywords = ["검색 결과가 없습니다", "오류", "API ID", "실패"]
+            is_success = not any(k in real_law_text for k in error_keywords)
+
+            if is_success:
+                api_success_count += 1
+                header = f"✅ **{idx+1}. {law_name} 제{article_num}조 (확인됨)**"
+                content = real_law_text
+            else:
+                header = f"⚠️ **{idx+1}. {law_name} 제{article_num}조 (API 조회 실패)**"
+                content = "(국가법령정보센터에서 해당 조문을 찾지 못했습니다. 법령명이 정확한지 확인이 필요합니다.)"
+
+            report_lines.append(f"{header}\n{content}\n")
+
+        final_report = "\n".join(report_lines)
+
+        if api_success_count == 0:
+            prompt_fallback = f"""
+Role: 행정 법률 전문가
+Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
+상황: "{situation}"
+
+* 경고: 현재 외부 법령 API 연결이 원활하지 않습니다.
+당신이 알고 있는 지식을 바탕으로 가장 정확한 법령 정보를 작성하되,
+반드시 상단에 [AI 추론 결과]임을 명시하고 환각 가능성을 경고하시오.
+"""
+            ai_fallback_text = llm_service.generate_text(prompt_fallback).strip()
+
+            return f"""⚠️ **[시스템 경고: API 조회 실패]**
+(국가법령정보센터 연결에 실패하여 AI의 지식 기반으로 답변을 생성합니다. **환각(Hallucination)** 가능성이 있으므로 법제처 확인이 필수입니다.)
+
+--------------------------------------------------
+{ai_fallback_text}"""
+
+        return final_report
 
     @staticmethod
     def strategist(situation, legal_basis, search_results):
         prompt = f"""
 당신은 행정 업무 베테랑 '주무관'입니다.
-[민원 상황]: {situation}
-[법적 근거]:
-{legal_basis} 
-[유사 사례]: {search_results}
 
-위 정보를 종합하여 업무 처리 방향(Strategy)을 수립하세요.
-다음 3가지 항목을 포함하여 마크다운으로 작성하세요:
+[민원 상황]: {situation}
+[확보된 법적 근거]:
+{legal_basis}
+
+[유사 사례/판례]: {search_results}
+
+위 정보를 종합하여 이 민원을 처리하기 위한 **대략적인 업무 처리 방향(Strategy)**을 수립하세요.
+
+다음 3가지 항목 포함:
 1. 처리 방향
 2. 핵심 주의사항
 3. 예상 반발 및 대응
@@ -365,15 +406,57 @@ JSON 리스트로 추출하시오.
     @staticmethod
     def clerk(situation, legal_basis):
         today = datetime.now()
-        prompt = f"오늘:{today} 상황:{situation} 법령:{legal_basis} 기간(일수)만 숫자 출력."
-        try: days = int(re.sub(r"[^0-9]", "", llm_service.generate_text(prompt)))
-        except: days = 15
-        return {"today_str": today.strftime("%Y. %m. %d."), "deadline_str": (today+timedelta(days)).strftime("%Y. %m. %d."), "days_added": days, "doc_num": f"행정-{today.strftime('%Y')}-{int(time.time())%1000:03d}호"}
+        prompt = f"""
+오늘: {today.strftime('%Y-%m-%d')}
+상황: {situation}
+법령: {legal_basis}
+이행/의견제출 기간은 며칠인가?
+숫자만 출력. 모르겠으면 15.
+"""
+        try:
+            res = llm_service.generate_text(prompt)
+            days = int(re.sub(r"[^0-9]", "", res))
+        except Exception:
+            days = 15
+
+        deadline = today + timedelta(days=days)
+        return {
+            "today_str": today.strftime("%Y. %m. %d."),
+            "deadline_str": deadline.strftime("%Y. %m. %d."),
+            "days_added": days,
+            "doc_num": f"행정-{today.strftime('%Y')}-{int(time.time())%1000:03d}호",
+        }
 
     @staticmethod
     def drafter(situation, legal_basis, meta_info, strategy):
-        doc_schema = {"type": "OBJECT", "properties": {"title": {"type": "STRING"}, "receiver": {"type": "STRING"}, "body_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}}, "department_head": {"type": "STRING"}}}
-        prompt = f"상황:{situation} 법령:{legal_basis} 전략:{strategy} 공문서 작성."
+        doc_schema = {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "공문서 제목"},
+                "receiver": {"type": "STRING", "description": "수신인"},
+                "body_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "department_head": {"type": "STRING", "description": "발신 명의"},
+            },
+            "required": ["title", "receiver", "body_paragraphs", "department_head"],
+        }
+
+        prompt = f"""
+당신은 행정기관의 베테랑 서기입니다. 아래 정보를 바탕으로 완결된 공문서를 작성하세요.
+
+[입력 정보]
+- 민원 상황: {situation}
+- 법적 근거: {legal_basis}
+- 시행 일자: {meta_info['today_str']}
+- 기한: {meta_info['deadline_str']} ({meta_info['days_added']}일)
+
+[전략]
+{strategy}
+
+[작성 원칙]
+1. 본문에 법 조항 인용 필수
+2. 본문 구조: 경위 -> 법적 근거 -> 처분 내용 -> 이의제기 절차
+3. 개인정보 마스킹('OOO')
+"""
         return llm_service.generate_json(prompt, schema=doc_schema)
 
 
@@ -383,50 +466,42 @@ JSON 리스트로 추출하시오.
 def run_workflow(user_input):
     log_placeholder = st.empty()
     logs = []
+
     def add_log(msg, style="sys"):
         logs.append(f"<div class='agent-log log-{style}'>{_escape(msg)}</div>")
         log_placeholder.markdown("".join(logs), unsafe_allow_html=True)
         time.sleep(0.3)
 
     add_log("🔍 Phase 1: 법령 및 유사 사례 리서치 중...", "legal")
-    
-    # [수정] 딕셔너리로 결과 받기
-    research_pack = LegalAgents.researcher(user_input)
-    legal_ui_data = research_pack["ui_data"]      # UI용 리스트
-    legal_text_ai = research_pack["full_text"]    # AI용 텍스트
-    
+    legal_basis = LegalAgents.researcher(user_input)
     add_log("📜 법적 근거 발견 완료", "legal")
 
-    add_log("🟩 네이버 뉴스 검색 가동...", "search")
+    add_log("🟩 네이버 검색 엔진 가동...", "search")
     try:
         search_results = search_service.search_precedents(user_input)
-    except:
-        search_results = "검색 모듈 미연결"
+    except Exception:
+        search_results = "검색 모듈 미연결 (건너뜀)"
 
-    add_log("🧠 Phase 2: AI 주무관이 전략 수립 중...", "strat")
-    # [수정] Strategist에게는 '텍스트'만 전달
-    strategy = LegalAgents.strategist(user_input, legal_text_ai, search_results)
+    add_log("🧠 Phase 2: AI 주무관이 업무 처리 방향을 수립합니다...", "strat")
+    strategy = LegalAgents.strategist(user_input, legal_basis, search_results)
 
-    add_log("📅 Phase 3: 기한 산정 및 문서 작성...", "calc")
-    # [수정] Clerk, Drafter에게도 '텍스트' 전달
-    meta_info = LegalAgents.clerk(user_input, legal_text_ai)
-    
+    add_log("📅 Phase 3: 기한 산정 및 공문서 작성 시작...", "calc")
+    meta_info = LegalAgents.clerk(user_input, legal_basis)
+
     add_log("✍️ 최종 공문서 조판 중...", "draft")
-    doc_data = LegalAgents.drafter(user_input, legal_text_ai, meta_info, strategy)
+    doc_data = LegalAgents.drafter(user_input, legal_basis, meta_info, strategy)
 
-    add_log("💾 업무 기록 저장 중...", "sys")
-    # [수정] DB에는 텍스트로 저장 (나중에 보기 편하게)
-    save_result = db_service.save_log(user_input, legal_text_ai, strategy, doc_data)
+    add_log("💾 업무 기록을 데이터베이스(Supabase)에 저장 중...", "sys")
+    save_result = db_service.save_log(user_input, legal_basis, strategy, doc_data)
 
-    add_log(f"✅ 완료되었습니다. ({save_result})", "sys")
+    add_log(f"✅ 모든 행정 절차가 완료되었습니다. ({save_result})", "sys")
     time.sleep(1)
     log_placeholder.empty()
 
     return {
         "doc": doc_data,
         "meta": meta_info,
-        "law": legal_text_ai, # (텍스트 버전) -> UI에서 직접 사용하지 않음 (이전 호환성용)
-        "law_ui": legal_ui_data, # [핵심] UI에는 구조화된 리스트 전달
+        "law": legal_basis,
         "search": search_results,
         "strategy": strategy,
         "save_msg": save_result,
@@ -441,7 +516,7 @@ def main():
 
     with col_left:
         st.title("🏢 AI 행정관 Pro")
-        st.caption("Gemini + 국가법령정보 + Naver News + Strategy + DB")
+        st.caption("Gemini + 국가법령정보 + Naver Search + Strategy + DB")
         st.markdown("---")
 
         st.markdown("### 🗣️ 업무 지시")
@@ -471,24 +546,23 @@ def main():
             else:
                 st.error(f"❌ {res['save_msg']}")
 
+            # ▼ 들여쓰기 레벨 1 (if "workflow_result" 내부)
             with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
+                # ▼ 들여쓰기 레벨 2 (expander 내부)
                 col1, col2 = st.columns(2)
                 
                 # ---------------------------------------------------------
-                # 1. 좌측: 적용 법령 (카드형 UI, 줄바꿈, 볼드체)
+                # 1. 좌측: 적용 법령
                 # ---------------------------------------------------------
                 with col1:
                     st.markdown("**📜 적용 법령**")
                     
-                    # Researcher에서 full_text를 반환하지만, UI용은 원래 스트링이므로
-                    # 여기서 full_text(res["law"])를 사용합니다.
                     raw_law = res["law"]
-                    
-                    # [1] 텍스트 전처리
+                    # [1] 특수문자 및 마크다운 깨짐 복구
                     cleaned_law = raw_law.replace("&lt;", "<").replace("&gt;", ">")
                     cleaned_law = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned_law)
-                    cleaned_law = cleaned_law.replace("---", "<br><br>") # 제목 구분선 줄바꿈
                     
+                    # [2] 카드 스타일 적용
                     st.markdown(
                         f"""
                         <div style="
@@ -510,17 +584,16 @@ def main():
                     )
 
                 # ---------------------------------------------------------
-                # 2. 우측: 관련 뉴스 (볼드체, 링크, 폰트 축소)
+                # 2. 우측: 유사 사례 (오류가 났던 부분)
                 # ---------------------------------------------------------
+                # 주의: with col2는 with col1과 정확히 같은 세로선상에 있어야 합니다.
                 with col2:
                     st.markdown("**🟩 관련 뉴스/사례**")
                     
                     raw_news = res["search"]
                     
+                    # [1] 뉴스 데이터 전처리
                     news_body = raw_news.replace("# ", "").replace("## ", "")
-                    # 볼드체 변환
-                    news_body = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", news_body)
-                    # 링크 변환
                     news_html = re.sub(
                         r'\[([^\]]+)\]\(([^)]+)\)', 
                         r'<a href="\2" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600;">\1</a>', 
@@ -528,6 +601,7 @@ def main():
                     )
                     news_html = news_html.replace("\n", "<br>")
 
+                    # [2] 뉴스용 카드 스타일
                     st.markdown(
                         f"""
                         <div style="
@@ -547,60 +621,6 @@ def main():
                         """,
                         unsafe_allow_html=True
                     )
-
-            # ---------------------------------------------------------
-            # 3. 전략 섹션 (3단 세로 배치, 볼드체 지원)
-            # ---------------------------------------------------------
-            with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
-                raw_strategy = res["strategy"]
-
-                # 텍스트 파싱
-                direction_text = ""
-                caution_text = ""
-                rebuttal_text = ""
-
-                match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
-                if match_dir: direction_text = match_dir.group(1).strip()
-                
-                match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
-                if match_caution: caution_text = match_caution.group(1).strip()
-                
-                match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
-                if match_rebuttal: rebuttal_text = match_rebuttal.group(1).strip()
-
-                if not direction_text: direction_text = raw_strategy
-
-                def fix_bold(text):
-                    return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
-
-                final_dir = fix_bold(direction_text)
-                final_caution = fix_bold(caution_text)
-                final_rebuttal = fix_bold(rebuttal_text)
-
-                # 🔵 1. 처리 방향
-                st.markdown(f"""
-                <div style="background-color: #eff6ff; border-left: 5px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #1e40af; margin-top: 0; margin-bottom: 10px; font-size: 1.1rem;">🚀 업무 처리 방향 (Action Plan)</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #334155; white-space: pre-wrap;">{final_dir}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # 🟡 2. 핵심 주의사항
-                st.markdown(f"""
-                <div style="background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #92400e; margin-top: 0; margin-bottom: 10px; font-size: 1.05rem;">⚠️ 핵심 주의사항</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #451a03; white-space: pre-wrap;">{final_caution}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # 🔴 3. 예상 반발 및 대응
-                st.markdown(f"""
-                <div style="background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 20px; border-radius: 8px; margin-bottom: 0px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #991b1b; margin-top: 0; margin-bottom: 10px; font-size: 1.05rem;">🛡️ 예상 반발 및 대응</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
