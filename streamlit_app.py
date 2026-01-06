@@ -547,22 +547,24 @@ def main():
                 st.error(f"❌ {res['save_msg']}")
 
             # ▼ 들여쓰기 레벨 1 (if "workflow_result" 내부)
-            with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
-                # ▼ 들여쓰기 레벨 2 (expander 내부)
+with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
                 col1, col2 = st.columns(2)
                 
                 # ---------------------------------------------------------
-                # 1. 좌측: 적용 법령
+                # 1. 좌측: 적용 법령 (카드형 UI, 줄바꿈, 볼드체)
                 # ---------------------------------------------------------
                 with col1:
                     st.markdown("**📜 적용 법령**")
                     
+                    # Researcher에서 full_text를 반환하지만, UI용은 원래 스트링이므로
+                    # 여기서 full_text(res["law"])를 사용합니다.
                     raw_law = res["law"]
-                    # [1] 특수문자 및 마크다운 깨짐 복구
+                    
+                    # [1] 텍스트 전처리
                     cleaned_law = raw_law.replace("&lt;", "<").replace("&gt;", ">")
                     cleaned_law = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned_law)
+                    cleaned_law = cleaned_law.replace("---", "<br><br>") # 제목 구분선 줄바꿈
                     
-                    # [2] 카드 스타일 적용
                     st.markdown(
                         f"""
                         <div style="
@@ -584,16 +586,17 @@ def main():
                     )
 
                 # ---------------------------------------------------------
-                # 2. 우측: 유사 사례 (오류가 났던 부분)
+                # 2. 우측: 관련 뉴스 (볼드체, 링크, 폰트 축소)
                 # ---------------------------------------------------------
-                # 주의: with col2는 with col1과 정확히 같은 세로선상에 있어야 합니다.
                 with col2:
                     st.markdown("**🟩 관련 뉴스/사례**")
                     
                     raw_news = res["search"]
                     
-                    # [1] 뉴스 데이터 전처리
                     news_body = raw_news.replace("# ", "").replace("## ", "")
+                    # 볼드체 변환
+                    news_body = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", news_body)
+                    # 링크 변환
                     news_html = re.sub(
                         r'\[([^\]]+)\]\(([^)]+)\)', 
                         r'<a href="\2" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600;">\1</a>', 
@@ -601,7 +604,6 @@ def main():
                     )
                     news_html = news_html.replace("\n", "<br>")
 
-                    # [2] 뉴스용 카드 스타일
                     st.markdown(
                         f"""
                         <div style="
@@ -621,6 +623,59 @@ def main():
                         """,
                         unsafe_allow_html=True
                     )
+
+            # ---------------------------------------------------------
+            # 3. 전략 섹션 (3단 세로 배치, 볼드체 지원)
+            # ---------------------------------------------------------
+            with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
+                raw_strategy = res["strategy"]
+
+                # 텍스트 파싱
+                direction_text = ""
+                caution_text = ""
+                rebuttal_text = ""
+
+                match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
+                if match_dir: direction_text = match_dir.group(1).strip()
+                
+                match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
+                if match_caution: caution_text = match_caution.group(1).strip()
+                
+                match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
+                if match_rebuttal: rebuttal_text = match_rebuttal.group(1).strip()
+
+                if not direction_text: direction_text = raw_strategy
+
+                def fix_bold(text):
+                    return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+
+                final_dir = fix_bold(direction_text)
+                final_caution = fix_bold(caution_text)
+                final_rebuttal = fix_bold(rebuttal_text)
+
+                # 🔵 1. 처리 방향
+                st.markdown(f"""
+                <div style="background-color: #eff6ff; border-left: 5px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <h4 style="color: #1e40af; margin-top: 0; margin-bottom: 10px; font-size: 1.1rem;">🚀 업무 처리 방향 (Action Plan)</h4>
+                    <div style="font-size: 0.95rem; line-height: 1.6; color: #334155; white-space: pre-wrap;">{final_dir}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # 🟡 2. 핵심 주의사항
+                st.markdown(f"""
+                <div style="background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <h4 style="color: #92400e; margin-top: 0; margin-bottom: 10px; font-size: 1.05rem;">⚠️ 핵심 주의사항</h4>
+                    <div style="font-size: 0.95rem; line-height: 1.6; color: #451a03; white-space: pre-wrap;">{final_caution}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # 🔴 3. 예상 반발 및 대응
+                st.markdown(f"""
+                <div style="background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 20px; border-radius: 8px; margin-bottom: 0px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <h4 style="color: #991b1b; margin-top: 0; margin-bottom: 10px; font-size: 1.05rem;">🛡️ 예상 반발 및 대응</h4>
+                    <div style="font-size: 0.95rem; line-height: 1.6; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
+                </div>
+                """, unsafe_allow_html=True)
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
