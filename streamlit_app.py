@@ -627,7 +627,7 @@ def main():
             # ---------------------------------------------------------
             # 3. 전략 섹션 (3단 세로 배치, 볼드체 지원)
             # ---------------------------------------------------------
-            with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
+with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
     raw_strategy = res["strategy"]
 
     # 텍스트 파싱
@@ -663,26 +663,26 @@ def main():
 
     combined = fix_bold(combined)
 
-    # ✅ 한 박스 + 일반적인 줄간격(너무 넓지 않게)
     st.markdown(
         f"""
-        <div style="
-            background:#ffffff;
-            border: 1px solid #e5e7eb;
-            padding: 18px 18px;
-            border-radius: 10px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-            font-family: 'Pretendard', sans-serif;
-            font-size: 0.95rem;
-            line-height: 1.55;
-            color: #111827;
-            white-space: pre-wrap;
-        ">
+<div style="
+  background:#ffffff;
+  border: 1px solid #e5e7eb;
+  padding: 18px 18px;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  font-family: 'Pretendard', sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: #111827;
+  white-space: pre-wrap;
+">
 {combined}
-        </div>
-        """,
-        unsafe_allow_html=True
+</div>
+""",
+        unsafe_allow_html=True,
     )
+
 
     with col_right:
         if "workflow_result" in st.session_state:
