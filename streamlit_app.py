@@ -547,24 +547,24 @@ def main():
                 st.error(f"❌ {res['save_msg']}")
 
             # ▼ 들여쓰기 레벨 1 (if "workflow_result" 내부)
-with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
+            with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
                 col1, col2 = st.columns(2)
-                
+
                 # ---------------------------------------------------------
                 # 1. 좌측: 적용 법령 (카드형 UI, 줄바꿈, 볼드체)
                 # ---------------------------------------------------------
                 with col1:
                     st.markdown("**📜 적용 법령**")
-                    
+
                     # Researcher에서 full_text를 반환하지만, UI용은 원래 스트링이므로
                     # 여기서 full_text(res["law"])를 사용합니다.
                     raw_law = res["law"]
-                    
+
                     # [1] 텍스트 전처리
                     cleaned_law = raw_law.replace("&lt;", "<").replace("&gt;", ">")
                     cleaned_law = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned_law)
-                    cleaned_law = cleaned_law.replace("---", "<br><br>") # 제목 구분선 줄바꿈
-                    
+                    cleaned_law = cleaned_law.replace("---", "<br><br>")  # 제목 구분선 줄바꿈
+
                     st.markdown(
                         f"""
                         <div style="
@@ -590,16 +590,16 @@ with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
                 # ---------------------------------------------------------
                 with col2:
                     st.markdown("**🟩 관련 뉴스/사례**")
-                    
+
                     raw_news = res["search"]
-                    
+
                     news_body = raw_news.replace("# ", "").replace("## ", "")
                     # 볼드체 변환
                     news_body = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", news_body)
                     # 링크 변환
                     news_html = re.sub(
-                        r'\[([^\]]+)\]\(([^)]+)\)', 
-                        r'<a href="\2" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600;">\1</a>', 
+                        r'\[([^\]]+)\]\(([^)]+)\)',
+                        r'<a href="\2" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600;">\1</a>',
                         news_body
                     )
                     news_html = news_html.replace("\n", "<br>")
@@ -636,15 +636,19 @@ with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
                 rebuttal_text = ""
 
                 match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
-                if match_dir: direction_text = match_dir.group(1).strip()
-                
-                match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
-                if match_caution: caution_text = match_caution.group(1).strip()
-                
-                match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
-                if match_rebuttal: rebuttal_text = match_rebuttal.group(1).strip()
+                if match_dir:
+                    direction_text = match_dir.group(1).strip()
 
-                if not direction_text: direction_text = raw_strategy
+                match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
+                if match_caution:
+                    caution_text = match_caution.group(1).strip()
+
+                match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
+                if match_rebuttal:
+                    rebuttal_text = match_rebuttal.group(1).strip()
+
+                if not direction_text:
+                    direction_text = raw_strategy
 
                 def fix_bold(text):
                     return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
@@ -676,6 +680,7 @@ with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
                     <div style="font-size: 0.95rem; line-height: 1.6; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
                 </div>
                 """, unsafe_allow_html=True)
+
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
