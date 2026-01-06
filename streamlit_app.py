@@ -136,35 +136,13 @@ class LLMService:
 
 class SearchService:
     """
-    ✅ Hybrid Search Engine
-    1. AI Query Optimizer
-    2. Heuristic Filter
-    3. LLM Re-ranking
+    ✅ 뉴스 중심의 경량 검색 엔진 (과적합 방지형)
     """
     def __init__(self):
         g = st.secrets.get("general", {})
         self.client_id = g.get("NAVER_CLIENT_ID")
         self.client_secret = g.get("NAVER_CLIENT_SECRET")
-
-        self.web_url = "https://openapi.naver.com/v1/search/webkr.json"
         self.news_url = "https://openapi.naver.com/v1/search/news.json"
-
-        self.whitelist_domains = [
-            "law.go.kr", "scourt.go.kr", "acrc.go.kr", "korea.kr",
-            "go.kr", "moj.go.kr", "police.go.kr", "easylaw.go.kr", "moleg.go.kr"
-        ]
-
-        self.blacklist_domains = [
-            "blog.naver.com", "m.blog.naver.com", "cafe.naver.com", "m.cafe.naver.com",
-            "post.naver.com", "tistory.com", "brunch.co.kr", "youtube.com",
-            "youtu.be", "instagram.com", "facebook.com", "namu.wiki", "kin.naver.com"
-        ]
-
-        self.signal_keywords = [
-            "행정심판", "재결", "처분", "과태료", "이행명령", "사전통지",
-            "의견제출", "청문", "행정절차법", "판결", "판례", "대법원",
-            "조례", "시행규칙", "고시", "훈령", "예규", "지침", "공고"
-        ]
 
     def _headers(self):
         return {
@@ -172,199 +150,46 @@ class SearchService:
             "X-Naver-Client-Secret": self.client_secret,
         }
 
-    # ✅ 필수: 누락됐던 네이버 검색 함수
-    def _naver_search(self, url: str, query: str, display: int = 10):
-        params = {"query": query, "display": display, "start": 1, "sort": "sim"}
-        res = requests.get(url, headers=self._headers(), params=params, timeout=8)
-        res.raise_for_status()
-        return res.json()
-
     def _clean_html(self, s: str) -> str:
         if not s: return ""
-        s = re.sub(r"<\/?b>", "", s)
         s = re.sub(r"<[^>]+>", "", s)
+        s = re.sub(r"&quot;", '"', s); s = re.sub(r"&lt;", '<', s)
+        s = re.sub(r"&gt;", '>', s); s = re.sub(r"&amp;", '&', s)
         return s.strip()
 
-    def _get_domain(self, link: str) -> str:
-        if not link: return ""
-        m = re.search(r"https?://([^/]+)", link)
-        return (m.group(1).lower() if m else "").strip()
-
-    def _is_blacklisted(self, domain: str) -> bool:
-        d = domain.lower()
-        for bad in self.blacklist_domains:
-            if bad in d: return True
-        return False
-
-    def _whitelist_score(self, domain: str) -> int:
-        d = domain.lower()
-        score = 0
-        for good in self.whitelist_domains:
-            if good == "go.kr":
-                if d.endswith(".go.kr") or d == "go.kr" or ".go.kr" in d: score += 8
-            else:
-                if good in d: score += 10
-        return score
-
-    def _keyword_score(self, text: str) -> int:
-        t = (text or "").lower()
-        score = 0
-        for kw in self.signal_keywords:
-            if kw.lower() in t: score += 2
-        return score
-
-    def _score_item(self, title: str, desc: str, link: str) -> int:
-        domain = self._get_domain(link)
-        if self._is_blacklisted(domain): return -999
-        score = 0
-        score += self._whitelist_score(domain)
-        score += self._keyword_score(title) * 2
-        score += self._keyword_score(desc)
-        if len((desc or "").strip()) < 25: score -= 3
-        if not (link or "").startswith("http"): score -= 5
-        return score
-
-    def _optimize_query_llm(self, situation: str) -> str:
-        prompt = f"""
-당신은 행정 데이터 검색 전문가입니다.
-아래 민원 상황을 해결하기 위해 네이버에서 검색할 '최적의 키워드'를 생성하세요.
-
-[민원 상황]: "{situation}"
-
-[요청사항]
-1. 행정 실무 용어(예: 처분, 불복, 재결례)를 포함하세요.
-2. 조사나 서술어를 뺀 '명사형 키워드' 위주로 작성하세요.
-출력 예시: 도로교통법 제32조 주정차위반 의견제출 인용 사례
-"""
+    def _extract_keywords_llm(self, situation: str) -> str:
+        prompt = f"상황: '{situation}'\n뉴스 검색을 위한 핵심 키워드 2개만 콤마로 구분해 출력. (예: 자동차 정비범위, 영업정지)"
         try:
-            query = llm_service.generate_text(prompt).strip()
-            return re.sub(r'["\']', "", query)
-        except Exception:
-            return situation
-
-    def _rerank_results_llm(self, situation: str, candidate_items: list) -> list:
-        if not candidate_items:
-            return []
-        context_text = ""
-        for idx, item in enumerate(candidate_items[:7]):
-            context_text += f"[{idx}] 제목: {item['title']} / 내용: {item['desc']} / 출처: {item['domain']}\n"
-
-        prompt = f"""
-[역할]: 베테랑 행정 공무원
-[상황]: "{situation}"
-[임무]: 위 상황을 처리할 때, 아래 검색 결과 중 '가장 신뢰할 수 있고 참고가 되는 자료'를 순서대로 선택하시오.
-
-[검색 결과 후보]
-{context_text}
-
-[출력 형식 - JSON List]
-도움이 되는 순서대로 인덱스 번호(숫자)만 리스트로 출력하세요.
-예: [2, 0, 5]
-"""
-        try:
-            ranking_indices = llm_service.generate_json(prompt)
-            if isinstance(ranking_indices, list):
-                reranked = []
-                for idx in ranking_indices:
-                    if isinstance(idx, int) and 0 <= idx < len(candidate_items):
-                        reranked.append(candidate_items[idx])
-                return reranked
-            return candidate_items
-        except Exception:
-            return candidate_items
+            res = llm_service.generate_text(prompt).strip()
+            return re.sub(r'[".?]', '', res)
+        except:
+            return situation[:20]
 
     def search_precedents(self, situation: str, top_k: int = 3) -> str:
         if not self.client_id or not self.client_secret:
-            return "⚠️ 네이버 API 키가 설정되지 않았습니다."
+            return "⚠️ 네이버 API 키가 없습니다."
 
         try:
-            optimized_query = self._optimize_query_llm(situation)
-            final_query = f"{optimized_query} (site:go.kr OR site:kr OR 판례 OR 재결)"
+            keywords = self._extract_keywords_llm(situation)
+            params = {"query": keywords, "display": 10, "sort": "sim"}
+            
+            res = requests.get(self.news_url, headers=self._headers(), params=params, timeout=8)
+            res.raise_for_status()
+            items = res.json().get("items", [])
 
-            web_res = self._naver_search(self.web_url, final_query, display=10)
-            news_res = self._naver_search(self.news_url, final_query, display=10)
+            if not items:
+                return f"🔍 `{keywords}` 관련 최신 사례가 없습니다."
 
-            merged = []
-            seen = set()
-            for src_name, payload in [("웹", web_res), ("뉴스", news_res)]:
-                for it in (payload.get("items", []) or []):
-                    link = it.get("link", "#")
-                    if link in seen:
-                        continue
-                    seen.add(link)
-
-                    title = self._clean_html(it.get("title", ""))
-                    desc = self._clean_html(it.get("description", ""))
-                    score = self._score_item(title, desc, link)
-
-                    if score > -100:
-                        merged.append({
-                            "src": src_name,
-                            "title": title,
-                            "desc": desc,
-                            "link": link,
-                            "domain": self._get_domain(link),
-                            "score": score
-                        })
-
-            if not merged:
-                return f"검색어 '{optimized_query}'에 대한 유의미한 결과가 없습니다."
-
-            merged.sort(key=lambda x: x["score"], reverse=True)
-            candidates = merged[:7]
-
-            final_items = self._rerank_results_llm(situation, candidates)
-            if not final_items:
-                final_items = candidates[:top_k]
-            else:
-                final_items = final_items[:top_k]
-
-            lines = []
-            lines.append(f"🔍 **AI 최적화 검색어:** `{optimized_query}`")
-            lines.append(f"🧠 **AI 선별 결과 (Top {len(final_items)})**")
-            lines.append("---")
-            for it in final_items:
-                lines.append(f"- ({it['src']}) **[{it['title']}]({it['link']})** `[{it['domain']}]`\n  : {it['desc']}")
+            lines = [f"📰 **최신 뉴스 사례 (검색어: {keywords})**", "---"]
+            for it in items[:top_k]:
+                title = self._clean_html(it.get("title", ""))
+                desc = self._clean_html(it.get("description", ""))
+                link = it.get("link", "#")
+                lines.append(f"- **[{title}]({link})**\n  : {desc[:150]}...")
+            
             return "\n".join(lines)
-
-        except requests.HTTPError as e:
-            return f"네이버 API 호출 오류: {e}"
         except Exception as e:
-            return f"검색 프로세스 중 오류: {e}"
-
-
-class DatabaseService:
-    """Supabase Persistence Layer"""
-    def __init__(self):
-        try:
-            self.url = st.secrets["supabase"]["SUPABASE_URL"]
-            self.key = st.secrets["supabase"]["SUPABASE_KEY"]
-            self.client = create_client(self.url, self.key)
-            self.is_active = True
-        except Exception:
-            self.is_active = False
-
-    def save_log(self, user_input, legal_basis, strategy, doc_data):
-        if not self.is_active:
-            return "DB 미연결 (저장 건너뜀)"
-
-        try:
-            final_summary_content = {
-                "strategy": strategy,
-                "document_content": doc_data,
-            }
-
-            data = {
-                "situation": user_input,
-                "law_name": legal_basis,
-                "summary": json.dumps(final_summary_content, ensure_ascii=False),
-            }
-
-            self.client.table("law_reports").insert(data).execute()
-            return "DB 저장 성공"
-        except Exception as e:
-            return f"DB 저장 실패: {e}"
-
+            return f"검색 중 오류: {str(e)}"
 
 class LawOfficialService:
     """
