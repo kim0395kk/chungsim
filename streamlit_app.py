@@ -445,8 +445,10 @@ Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
 숫자만 출력. 모르겠으면 15.
 """
         try:
-            res = llm_service.generate_text(prompt)
-            days = int(re.sub(r"[^0-9]", "", res))
+            res = (llm_service.generate_text(prompt) or "").strip()
+            m = re.search(r"\d{1,3}", res)  # 1~3자리만 허용
+            days = int(m.group(0)) if m else 15
+            days = max(1, min(days, 90))    # 1~90일로 강제
         except Exception:
             days = 15
 
