@@ -628,58 +628,61 @@ def main():
             # 3. 전략 섹션 (3단 세로 배치, 볼드체 지원)
             # ---------------------------------------------------------
             with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
-                raw_strategy = res["strategy"]
+    raw_strategy = res["strategy"]
 
-                # 텍스트 파싱
-                direction_text = ""
-                caution_text = ""
-                rebuttal_text = ""
+    # 텍스트 파싱
+    direction_text = ""
+    caution_text = ""
+    rebuttal_text = ""
 
-                match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
-                if match_dir:
-                    direction_text = match_dir.group(1).strip()
+    match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
+    if match_dir:
+        direction_text = match_dir.group(1).strip()
 
-                match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
-                if match_caution:
-                    caution_text = match_caution.group(1).strip()
+    match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
+    if match_caution:
+        caution_text = match_caution.group(1).strip()
 
-                match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
-                if match_rebuttal:
-                    rebuttal_text = match_rebuttal.group(1).strip()
+    match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
+    if match_rebuttal:
+        rebuttal_text = match_rebuttal.group(1).strip()
 
-                if not direction_text:
-                    direction_text = raw_strategy
+    if not direction_text:
+        direction_text = raw_strategy
 
-                def fix_bold(text):
-                    return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+    def fix_bold(text: str) -> str:
+        return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text or "")
 
-                final_dir = fix_bold(direction_text)
-                final_caution = fix_bold(caution_text)
-                final_rebuttal = fix_bold(rebuttal_text)
+    # 섹션을 한 덩어리로 합치기
+    combined = ""
+    combined += "<b>1. 처리 방향</b>\n" + (direction_text or "").strip() + "\n\n"
+    if caution_text:
+        combined += "<b>2. 핵심 주의사항</b>\n" + caution_text.strip() + "\n\n"
+    if rebuttal_text:
+        combined += "<b>3. 예상 반발 및 대응</b>\n" + rebuttal_text.strip()
 
-                # 🔵 1. 처리 방향
-                st.markdown(f"""
-                <div style="background-color: #eff6ff; border-left: 5px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #1e40af; margin-top: 0; margin-bottom: 10px; font-size: 1.1rem;">🚀 업무 처리 방향 (Action Plan)</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #334155; white-space: pre-wrap;">{final_dir}</div>
-                </div>
-                """, unsafe_allow_html=True)
+    combined = fix_bold(combined)
 
-                # 🟡 2. 핵심 주의사항
-                st.markdown(f"""
-                <div style="background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #92400e; margin-top: 0; margin-bottom: 10px; font-size: 1.05rem;">⚠️ 핵심 주의사항</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #451a03; white-space: pre-wrap;">{final_caution}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # 🔴 3. 예상 반발 및 대응
-                st.markdown(f"""
-                <div style="background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 20px; border-radius: 8px; margin-bottom: 0px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <h4 style="color: #991b1b; margin-top: 0; margin-bottom: 10px; font-size: 1.05rem;">🛡️ 예상 반발 및 대응</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.6; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
-                </div>
-                """, unsafe_allow_html=True)
+    # ✅ 한 박스 + 일반적인 줄간격(너무 넓지 않게)
+    st.markdown(
+        f"""
+        <div style="
+            background:#ffffff;
+            border: 1px solid #e5e7eb;
+            padding: 18px 18px;
+            border-radius: 10px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            font-family: 'Pretendard', sans-serif;
+            font-size: 0.95rem;
+            line-height: 1.55;
+            color: #111827;
+            white-space: pre-wrap;
+        ">
+{combined}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     with col_right:
         if "workflow_result" in st.session_state:
