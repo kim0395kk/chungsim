@@ -54,6 +54,35 @@ st.markdown(
 
     /* 전략 박스 스타일 */
     .strategy-box { background-color: #fffbeb; border: 1px solid #fcd34d; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+    /* ==============================
+   Streamlit Cloud 상단 Fork/GitHub 숨김
+   ============================== */
+
+/* 상단 오른쪽 툴바(Fork / GitHub / 메뉴 등) */
+header [data-testid="stToolbar"] {
+    display: none !important;
+}
+
+/* 상단 장식/라인(배포 환경에 따라 남는 경우) */
+header [data-testid="stDecoration"] {
+    display: none !important;
+}
+
+/* 상단 헤더 전체 여백 제거(공간 뜨는 것 방지) */
+header {
+    height: 0px !important;
+}
+
+/* 하단 footer(Streamlit) 제거 */
+footer {
+    display: none !important;
+}
+
+/* 우측 하단 Deploy/Running 같은 배지(환경에 따라) */
+div[data-testid="stStatusWidget"] {
+    display: none !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
