@@ -630,55 +630,81 @@ def main():
                     )
 
             # ---------------------------------------------------------
-            # 3. 전략 섹션 (줄 간격 축소 + AI 사족 제거 + 3단 배치)
+            # 3. 전략 섹션 (파싱 로직 강화 + 3단 배치)
             # ---------------------------------------------------------
             with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
                 raw_strategy = res["strategy"]
 
-                # 텍스트 파싱
-                direction_text = ""
-                caution_text = ""
-                rebuttal_text = ""
+                # [1] 강력한 텍스트 파싱 (숫자 헤더 기준 강제 분할)
+                def split_strategy(text):
+                    # 1. 텍스트 정규화 (줄바꿈 통일)
+                    text = text.replace("\r\n", "\n")
+                    
+                    # 2. 각 섹션의 시작 위치 찾기 (1., 2., 3. 으로 시작하는 라인)
+                    # (?:^|\n) -> 문장 처음이거나 줄바꿈 뒤에 오는 경우
+                    idx_1 = re.search(r'(?:^|\n)\s*1\.', text)
+                    idx_2 = re.search(r'(?:^|\n)\s*2\.', text)
+                    idx_3 = re.search(r'(?:^|\n)\s*3\.', text)
 
-                match_dir = re.search(r'1\.\s*처리 방향\s*(.*?)(?=\n2\.)', raw_strategy, re.DOTALL)
-                if match_dir: direction_text = match_dir.group(1).strip()
-                
-                match_caution = re.search(r'2\.\s*핵심 주의사항\s*(.*?)(?=\n3\.)', raw_strategy, re.DOTALL)
-                if match_caution: caution_text = match_caution.group(1).strip()
-                
-                match_rebuttal = re.search(r'3\.\s*예상 반발 및 대응\s*(.*)', raw_strategy, re.DOTALL)
-                if match_rebuttal: rebuttal_text = match_rebuttal.group(1).strip()
+                    p1, p2, p3 = "", "", ""
 
-                if not direction_text: direction_text = raw_strategy
+                    # 위치 정보를 기반으로 텍스트 자르기
+                    start_1 = idx_1.start() if idx_1 else 0
+                    start_2 = idx_2.start() if idx_2 else len(text)
+                    start_3 = idx_3.start() if idx_3 else len(text)
 
-                # [핵심] 줄 간격/볼드체/사족 처리 함수
+                    # 순서가 꼬일 경우를 대비해 정렬 (보통 1<2<3 이지만 안전장치)
+                    indices = sorted([start_1, start_2, start_3, len(text)])
+                    
+                    # 1번 섹션 (처리 방향)
+                    if idx_1: p1 = text[start_1:start_2].strip()
+                    # 2번 섹션 (주의사항)
+                    if idx_2: p2 = text[start_2:start_3].strip()
+                    # 3번 섹션 (반발 대응)
+                    if idx_3: p3 = text[start_3:].strip()
+                    
+                    # 만약 파싱 실패해서 p1만 있고 나머지가 비었다면, 원본을 그냥 둠 (에러 방지)
+                    if not p1 and not p2 and not p3: p1 = text
+
+                    # 각 섹션에서 제목 줄("1. 처리 방향" 등) 제거하고 내용만 남기기
+                    def remove_header(s):
+                        return re.sub(r'^\s*\d+\..*?(?:\n|$)', '', s, count=1).strip()
+
+                    return remove_header(p1), remove_header(p2), remove_header(p3)
+
+                direction_text, caution_text, rebuttal_text = split_strategy(raw_strategy)
+
+                # [2] 텍스트 후처리 (볼드체 변환 등)
                 def clean_text(text):
-                    # 1. 과도한 줄바꿈 제거 (빈 줄 압축)
+                    # 과도한 줄바꿈 제거
                     text = re.sub(r'\n\s*\n', '\n', text)
-                    # 2. 볼드체 변환
+                    # 볼드체 변환
                     text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
-                    # 3. 혹시 모를 AI 사족(인사말) 제거 시도 (선택 사항)
-                    # 문장이 '네,' '하지만' 등으로 시작하고 길이가 짧으면 제거하는 로직 등을 추가할 수 있으나,
-                    # 1단계(프롬프트) 수정이 가장 확실하므로 여기서는 줄바꿈 처리만 집중합니다.
                     return text
 
                 final_dir = clean_text(direction_text)
                 final_caution = clean_text(caution_text)
                 final_rebuttal = clean_text(rebuttal_text)
+                
+                # 빈 내용일 경우 기본 메시지 출력
+                if not final_caution: final_caution = "(주의사항 내용 없음)"
+                if not final_rebuttal: final_rebuttal = "(반발 대응 내용 없음)"
 
+                # [3] UI 렌더링
+                
                 # 🔵 1. 처리 방향
                 st.markdown(f"""
-                <div style="background-color: #eff6ff; border-left: 5px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                <div style="background-color: #eff6ff; border-left: 5px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                     <h4 style="color: #1e40af; margin-top: 0; margin-bottom: 8px; font-size: 1.1rem;">🚀 업무 처리 방향 (Action Plan)</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.45; color: #334155; white-space: pre-wrap;">{final_dir}</div>
+                    <div style="font-size: 0.95rem; line-height: 1.5; color: #334155; white-space: pre-wrap;">{final_dir}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
                 # 🟡 2. 핵심 주의사항
                 st.markdown(f"""
-                <div style="background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                <div style="background-color: #fffbeb; border-left: 5px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                     <h4 style="color: #92400e; margin-top: 0; margin-bottom: 8px; font-size: 1.05rem;">⚠️ 핵심 주의사항</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.45; color: #451a03; white-space: pre-wrap;">{final_caution}</div>
+                    <div style="font-size: 0.95rem; line-height: 1.5; color: #451a03; white-space: pre-wrap;">{final_caution}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -686,7 +712,7 @@ def main():
                 st.markdown(f"""
                 <div style="background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 20px; border-radius: 8px; margin-bottom: 0px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                     <h4 style="color: #991b1b; margin-top: 0; margin-bottom: 8px; font-size: 1.05rem;">🛡️ 예상 반발 및 대응</h4>
-                    <div style="font-size: 0.95rem; line-height: 1.45; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
+                    <div style="font-size: 0.95rem; line-height: 1.5; color: #7f1d1d; white-space: pre-wrap;">{final_rebuttal}</div>
                 </div>
                 """, unsafe_allow_html=True)
     with col_right:
