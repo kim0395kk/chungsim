@@ -802,10 +802,14 @@ def main():
         user_input = st.text_area(
             "업무 내용",
             height=150,
-            placeholder="[예시]\n- 상황: (무슨 일 / 어디 / 언제 / 증거 유무...)\n- 의도: (확인하고 싶은 쟁점: 요건/절차/근거...)\n- 요청: (원하는 결과물: 공문 종류/회신/사전통지 등)"
-
-            label_visibility="collapsed",
-        )
+            placeholder=(
+            "[예시]\n"
+            "- 상황: (무슨 일 / 어디 / 언제 / 증거 유무...)\n"
+            "- 의도: (확인하고 싶은 쟁점: 요건/절차/근거...)\n"
+            "- 요청: (원하는 결과물: 공문 종류/회신/사전통지 등)"
+        ),
+        label_visibility="collapsed",
+    )
 
         if st.button("⚡ 스마트 분석 시작", type="primary", use_container_width=True):
             if not user_input:
