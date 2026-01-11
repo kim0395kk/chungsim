@@ -795,27 +795,16 @@ def main():
 
     with col_left:
         st.title("🏢 AI 행정관 Pro 충주시청")
-        st.caption("문의 kim0395kk@korea.kr,  Govable-AI ")
+        st.caption("문의 kim0395kk@korea.kr Gemini + 국가법령정보 + Naver Search + Strategy + DB")
         st.markdown("---")
 
         st.markdown("### 🗣️ 업무 지시")
         user_input = st.text_area(
             "업무 내용",
             height=150,
-            placeholder=(
-            "[예시]\n"
-            "- 상황: (무슨 일 / 어디 / 언제 / 증거 유무...)\n"
-            "- 의도: (확인하고 싶은 쟁점: 요건/절차/근거...)\n"
-            "- 요청: (원하는 결과물: 공문 종류/회신/사전통지 등)"
-        ),
-        label_visibility="collapsed",
-    )
-
-        if st.button("⚡ 스마트 분석 시작", type="primary", use_container_width=True):
-            if not user_input:
-                st.warning("내용을 입력해주세요.")
-            else:
-                try:
+            placeholder="예시 \n- 상황: (무슨 일 / 어디 / 언제 / 증거 유무...).... \n- 의도: (확인하고 싶은 쟁점: 요건/절차/근거... )\n- 요청: (원하는 결과물: 공문 종류/회신/사전통지 등)",
+            label_visibility="collapsed",
+        )
 
         if st.button("⚡ 스마트 분석 시작", type="primary", use_container_width=True):
             if not user_input:
