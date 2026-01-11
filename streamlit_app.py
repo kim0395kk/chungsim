@@ -795,7 +795,7 @@ def main():
 
     with col_left:
         st.title("🏢 AI 행정관 Pro 충주시청")
-        st.caption("문의 kim0395kk@korea.kr Gemini + 국가법령정보 + Naver Search + Strategy + DB")
+        st.caption("문의 kim0395kk@korea.kr /n 세계최초 행정 Govable AI 에이젼트 ")
         st.markdown("---")
 
         st.markdown("### 🗣️ 업무 지시")
