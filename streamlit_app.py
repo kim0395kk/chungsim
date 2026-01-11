@@ -40,7 +40,7 @@ st.markdown(
     }
 
     .doc-header { text-align: center; font-size: 22pt; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px; }
-    .doc-info { display: flex; justify-content: space-between; font-size: 11pt; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; gap:10px; }
+    .doc-info { display: flex; justify-content: space-between; font-size: 11pt; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; gap:10px; flex-wrap:wrap; }
     .doc-body { font-size: 12pt; text-align: justify; white-space: pre-line; }
     .doc-footer { text-align: center; font-size: 20pt; font-weight: bold; margin-top: 80px; letter-spacing: 5px; }
     .stamp { position: absolute; bottom: 85px; right: 80px; border: 3px solid #cc0000; color: #cc0000; padding: 5px 10px; font-size: 14pt; font-weight: bold; transform: rotate(-15deg); opacity: 0.8; border-radius: 5px; }
@@ -122,7 +122,7 @@ class LLMService:
         except Exception:
             text = self.generate_text(prompt + "\n\nOutput strictly in JSON.")
             try:
-                match = re.search(r"\{.*\}", text, re.DOTALL)
+                match = re.search(r"\{.*\}|\[.*\]", text, re.DOTALL)
                 return json.loads(match.group(0)) if match else None
             except Exception:
                 return None
@@ -200,15 +200,17 @@ class SearchService:
 
 class DatabaseService:
     """
-    ✅ 로그인 없이도 DB 저장(기존처럼)
+    ✅ 로그인 없이도 DB 저장 (요청사항)
     - 최초 workflow 결과 insert 후 report_id 확보
     - 후속 Q/A 및 추가 조회 내용은 summary JSON에 누적해 update
     """
     def __init__(self):
         try:
             self.url = st.secrets["supabase"]["SUPABASE_URL"]
-            # ✅ 여기서는 '기존 방식 유지'를 위해 SUPABASE_KEY 사용(anon/service_role 둘 다 가능)
-            self.key = st.secrets["supabase"].get("SUPABASE_KEY") or st.secrets["supabase"].get("SUPABASE_ANON_KEY")
+            self.key = (
+                st.secrets["supabase"].get("SUPABASE_KEY")
+                or st.secrets["supabase"].get("SUPABASE_ANON_KEY")
+            )
             self.client = create_client(self.url, self.key)
             self.is_active = True
         except Exception:
@@ -222,7 +224,7 @@ class DatabaseService:
             "search_initial": res.get("search"),
             "law_initial": res.get("law"),
             "document_content": res.get("doc"),
-            "followup": followup,  # ✅ 후속 질문/답변 + 추가 조회 내용
+            "followup": followup,
         }
         return json.dumps(payload, ensure_ascii=False)
 
@@ -251,7 +253,7 @@ class DatabaseService:
         except Exception as e:
             return {"ok": False, "msg": f"DB 저장 실패: {e}", "id": None}
 
-    def update_followup(self, report_id: str, res: dict, followup: dict) -> dict:
+    def update_followup(self, report_id, res: dict, followup: dict) -> dict:
         """후속 Q/A 누적 저장(가능하면 update, 안 되면 insert fallback)"""
         if not self.is_active:
             return {"ok": False, "msg": "DB 미연결 (업데이트 건너뜀)"}
@@ -259,7 +261,7 @@ class DatabaseService:
         summary = self._pack_summary(res, followup)
 
         # 1) update 시도
-        if report_id:
+        if report_id is not None:
             try:
                 self.client.table("law_reports").update({"summary": summary}).eq("id", report_id).execute()
                 return {"ok": True, "msg": "DB 업데이트 성공"}
@@ -281,20 +283,32 @@ class DatabaseService:
 
 class LawOfficialService:
     """
-    law.go.kr API
-    - 링크는 '현행 원문'이 뜨게 ID로 생성(efYd 고정 회피)
+    국가법령정보센터(law.go.kr) 공식 API 연동
+
+    ✅ 후속질문에서 발생한 '링크는 줬는데 법령이 없다' 오류 원인:
+    - lawService.do?ID=... 조합이 환경/값에 따라 불일치하는 경우가 있음(특히 000213 같은 값)
+    - 해결: 검색 결과의 MST(법령일련번호)를 기반으로 링크를 생성(가장 안정적)
+      => https://www.law.go.kr/DRF/lawService.do?OC=...&target=law&MST=<mst>&type=HTML
+    - efYd(시행일) 파라미터는 넣지 않아서 "현행 아님" 문제를 최대한 회피
     """
     def __init__(self):
         self.api_id = st.secrets.get("general", {}).get("LAW_API_ID")
         self.base_url = "http://www.law.go.kr/DRF/lawSearch.do"
         self.service_url = "http://www.law.go.kr/DRF/lawService.do"
 
+    def _make_current_link(self, mst_id: str) -> str | None:
+        if not self.api_id or not mst_id:
+            return None
+        # ✅ efYd 파라미터 미포함(현행 아닙니다 이슈 회피)
+        return f"https://www.law.go.kr/DRF/lawService.do?OC={self.api_id}&target=law&MST={mst_id}&type=HTML"
+
     def get_law_text(self, law_name, article_num=None, return_link: bool = False):
         if not self.api_id:
             msg = "⚠️ API ID(OC)가 설정되지 않았습니다."
             return (msg, None) if return_link else msg
 
-        # 1) 법령 검색
+        # 1) 법령 검색 -> MST 확보
+        mst_id = ""
         try:
             params = {"OC": self.api_id, "target": "law", "type": "XML", "query": law_name, "display": 1}
             res = requests.get(self.base_url, params=params, timeout=6)
@@ -306,16 +320,13 @@ class LawOfficialService:
                 return (msg, None) if return_link else msg
 
             mst_id = (law_node.findtext("법령일련번호") or "").strip()
-            law_id = (law_node.findtext("법령ID") or "").strip()
-
-            current_link = None
-            if law_id:
-                current_link = f"https://www.law.go.kr/DRF/lawService.do?OC={self.api_id}&target=law&ID={law_id}&type=HTML"
         except Exception as e:
             msg = f"API 검색 중 오류: {e}"
             return (msg, None) if return_link else msg
 
-        # 2) 조문 가져오기
+        current_link = self._make_current_link(mst_id)
+
+        # 2) 상세 조문 가져오기 (MST 기반)
         try:
             if not mst_id:
                 msg = f"✅ '{law_name}'이(가) 확인되었습니다.\n(법령일련번호(MST) 추출 실패)\n🔗 현행 원문: {current_link or '-'}"
@@ -325,28 +336,24 @@ class LawOfficialService:
             res_detail = requests.get(self.service_url, params=detail_params, timeout=10)
             root_detail = ET.fromstring(res_detail.content)
 
-            found = False
-            target_text = ""
+            # 조문번호 지정된 경우: 해당 조문만
+            if article_num:
+                for article in root_detail.findall(".//조문단위"):
+                    jo_num_tag = article.find("조문번호")
+                    jo_content_tag = article.find("조문내용")
+                    if jo_num_tag is None or jo_content_tag is None:
+                        continue
 
-            for article in root_detail.findall(".//조문단위"):
-                jo_num_tag = article.find("조문번호")
-                jo_content_tag = article.find("조문내용")
-                if jo_num_tag is None or jo_content_tag is None:
-                    continue
+                    current_num = (jo_num_tag.text or "").strip()
+                    if str(article_num) == current_num:
+                        target_text = f"[{law_name} 제{current_num}조 전문]\n" + _escape((jo_content_tag.text or "").strip())
+                        for hang in article.findall(".//항"):
+                            hang_content = hang.find("항내용")
+                            if hang_content is not None:
+                                target_text += f"\n  - {(hang_content.text or '').strip()}"
+                        return (target_text, current_link) if return_link else target_text
 
-                current_num = (jo_num_tag.text or "").strip()
-                if article_num and str(article_num) == current_num:
-                    target_text = f"[{law_name} 제{current_num}조 전문]\n" + _escape((jo_content_tag.text or "").strip())
-                    for hang in article.findall(".//항"):
-                        hang_content = hang.find("항내용")
-                        if hang_content is not None:
-                            target_text += f"\n  - {(hang_content.text or '').strip()}"
-                    found = True
-                    break
-
-            if found:
-                return (target_text, current_link) if return_link else target_text
-
+            # 못 찾았거나 조문번호 미지정
             msg = f"✅ '{law_name}'이(가) 확인되었습니다.\n(상세 조문 자동 추출 실패 또는 조문번호 미지정)\n🔗 현행 원문: {current_link or '-'}"
             return (msg, current_link) if return_link else msg
 
@@ -409,7 +416,7 @@ class LegalAgents:
 
             if is_success:
                 api_success_count += 1
-                # ✅ 클릭하면 새창으로 현행 원문 링크
+                # ✅ 법령명 클릭 -> 새창에서 현행 원문
                 law_title = f"[{law_name}]({current_link})" if current_link else law_name
                 header = f"✅ **{idx+1}. {law_title} 제{article_num}조 (확인됨)**"
                 content = law_text
@@ -615,7 +622,7 @@ def build_case_context(res: dict) -> str:
 
 def needs_tool_call(user_msg: str) -> dict:
     t = user_msg.lower()
-    law_triggers = ["근거", "조문", "법령", "몇 조", "원문", "현행", "추가 조항", "다른 조문", "전문"]
+    law_triggers = ["근거", "조문", "법령", "몇 조", "원문", "현행", "추가 조항", "다른 조문", "전문", "절차법", "행정절차"]
     news_triggers = ["뉴스", "사례", "판례", "기사", "보도", "최근", "유사", "선례"]
     return {"need_law": any(k in t for k in law_triggers), "need_news": any(k in t for k in news_triggers)}
 
@@ -696,7 +703,7 @@ def render_followup_chat(res: dict):
     if "followup_extra_context" not in st.session_state:
         st.session_state["followup_extra_context"] = ""
     if "report_id" not in st.session_state:
-        st.session_state["report_id"] = None  # ✅ 초기 저장된 row id
+        st.session_state["report_id"] = None
 
     current_case_id = (res.get("meta") or {}).get("doc_num", "") or "case"
     if st.session_state["case_id"] != current_case_id:
@@ -717,7 +724,7 @@ def render_followup_chat(res: dict):
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
-    user_q = st.chat_input("결과를 바탕으로 추가로 물어보세요 (최대 5회)")
+    user_q = st.chat_input("공문 결과를 바탕으로 후속 질문 (최대 5회)")
     if not user_q:
         return
 
@@ -733,6 +740,7 @@ def render_followup_chat(res: dict):
     # 필요 시에만 툴 호출
     extra_ctx = st.session_state.get("followup_extra_context", "")
     tool_need = needs_tool_call(user_q)
+
     if tool_need["need_law"] or tool_need["need_news"]:
         plan = plan_tool_calls_llm(user_q, res.get("situation", ""), _strip_html(res.get("law", "")))
 
@@ -740,6 +748,7 @@ def render_followup_chat(res: dict):
             art = plan.get("article_num", 0)
             art = art if art > 0 else None
             law_text, law_link = law_api_service.get_law_text(plan["law_name"], art, return_link=True)
+
             extra_ctx += f"\n\n[추가 법령 조회]\n- 요청: {plan['law_name']} / 제{art if art else '?'}조\n{_strip_html(law_text)}"
             if law_link:
                 extra_ctx += f"\n(현행 원문 링크: {law_link})"
@@ -763,7 +772,7 @@ def render_followup_chat(res: dict):
 
     st.session_state["followup_messages"].append({"role": "assistant", "content": ans})
 
-    # ✅ DB에 후속까지 저장(요청사항)
+    # ✅ DB에 후속까지 저장
     followup_payload = {
         "count": st.session_state["followup_count"],
         "messages": st.session_state["followup_messages"],
@@ -827,13 +836,13 @@ def main():
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    st.markdown("**📜 적용 법령**")
+                    st.markdown("**📜 적용 법령 (법령명 클릭 시 현행 원문 새창)**")
                     raw_law = res.get("law", "")
 
                     cleaned = raw_law.replace("&lt;", "<").replace("&gt;", ">")
                     cleaned = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned)
 
-                    # ✅ markdown 링크를 새창 링크로 변환
+                    # ✅ markdown 링크 -> 새창 링크
                     cleaned = re.sub(
                         r'\[([^\]]+)\]\(([^)]+)\)',
                         r'<a href="\2" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:700;">\1</a>',
@@ -898,10 +907,6 @@ def main():
             with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
                 st.markdown(res.get("strategy", ""))
 
-            # ✅ 후속 질문(최대 5회) + DB 저장
-            with st.expander("💬 [후속 질문] 케이스 고정 챗봇 (최대 5회)", expanded=True):
-                render_followup_chat(res)
-
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
@@ -934,6 +939,15 @@ def main():
 </div>
 """
                 st.markdown(html_content, unsafe_allow_html=True)
+
+                # ✅ 후속 질문 위치: 공문 밑(요청사항)
+                st.markdown("---")
+                with st.expander("💬 [후속 질문] 케이스 고정 챗봇 (최대 5회)", expanded=True):
+                    render_followup_chat(res)
+
+            else:
+                st.warning("공문 생성 결과(doc)가 비어 있습니다. (모델 JSON 출력 실패 가능)")
+
         else:
             st.markdown(
                 """<div style='text-align: center; padding: 100px; color: #aaa; background: white; border-radius: 10px; border: 2px dashed #ddd;'>
