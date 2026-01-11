@@ -793,7 +793,7 @@ def render_followup_chat(res: dict):
 def main():
     col_left, col_right = st.columns([1, 1.2])
 
-    with col_left:
+        with col_left:
         st.title("🏢 AI 행정관 Pro 충주시청")
         st.caption("문의 kim0395kk@korea.kr,  Govable-AI ")
         st.markdown("---")
@@ -806,6 +806,12 @@ def main():
 
             label_visibility="collapsed",
         )
+
+        if st.button("⚡ 스마트 분석 시작", type="primary", use_container_width=True):
+            if not user_input:
+                st.warning("내용을 입력해주세요.")
+            else:
+                try:
 
         if st.button("⚡ 스마트 분석 시작", type="primary", use_container_width=True):
             if not user_input:
