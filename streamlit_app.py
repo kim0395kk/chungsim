@@ -54,34 +54,16 @@ st.markdown(
 
     /* 전략 박스 스타일 */
     .strategy-box { background-color: #fffbeb; border: 1px solid #fcd34d; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+
     /* ==============================
-   Streamlit Cloud 상단 Fork/GitHub 숨김
-   ============================== */
+       Streamlit Cloud 상단 Fork/GitHub 숨김
+       ============================== */
 
-/* 상단 오른쪽 툴바(Fork / GitHub / 메뉴 등) */
-header [data-testid="stToolbar"] {
-    display: none !important;
-}
-
-/* 상단 장식/라인(배포 환경에 따라 남는 경우) */
-header [data-testid="stDecoration"] {
-    display: none !important;
-}
-
-/* 상단 헤더 전체 여백 제거(공간 뜨는 것 방지) */
-header {
-    height: 0px !important;
-}
-
-/* 하단 footer(Streamlit) 제거 */
-footer {
-    display: none !important;
-}
-
-/* 우측 하단 Deploy/Running 같은 배지(환경에 따라) */
-div[data-testid="stStatusWidget"] {
-    display: none !important;
-}
+    header [data-testid="stToolbar"] { display: none !important; }
+    header [data-testid="stDecoration"] { display: none !important; }
+    header { height: 0px !important; }
+    footer { display: none !important; }
+    div[data-testid="stStatusWidget"] { display: none !important; }
 
 </style>
 """,
@@ -101,8 +83,9 @@ class LLMService:
     4. Groq (Llama 3 Backup)
     """
     def __init__(self):
-        self.gemini_key = st.secrets["general"].get("GEMINI_API_KEY")
-        self.groq_key = st.secrets["general"].get("GROQ_API_KEY")
+        g = st.secrets.get("general", {})
+        self.gemini_key = g.get("GEMINI_API_KEY")
+        self.groq_key = g.get("GROQ_API_KEY")
 
         self.gemini_models = [
             "gemini-2.5-flash",
@@ -123,7 +106,6 @@ class LLMService:
                     response_mime_type="application/json",
                     response_schema=schema
                 ) if is_json else None
-
                 res = model.generate_content(prompt, generation_config=config)
                 return res.text, model_name
             except Exception:
@@ -180,18 +162,21 @@ class SearchService:
         }
 
     def _clean_html(self, s: str) -> str:
-        if not s: return ""
+        if not s:
+            return ""
         s = re.sub(r"<[^>]+>", "", s)
-        s = re.sub(r"&quot;", '"', s); s = re.sub(r"&lt;", '<', s)
-        s = re.sub(r"&gt;", '>', s); s = re.sub(r"&amp;", '&', s)
+        s = re.sub(r"&quot;", '"', s)
+        s = re.sub(r"&lt;", '<', s)
+        s = re.sub(r"&gt;", '>', s)
+        s = re.sub(r"&amp;", '&', s)
         return s.strip()
 
     def _extract_keywords_llm(self, situation: str) -> str:
         prompt = f"상황: '{situation}'\n뉴스 검색을 위한 핵심 키워드 2개만 콤마로 구분해 출력. (예: 자동차 정비범위, 영업정지)"
         try:
             res = llm_service.generate_text(prompt).strip()
-            return re.sub(r'[".?]', '', res)
-        except:
+            return re.sub(r'[".?]', "", res)
+        except Exception:
             return situation[:20]
 
     def search_precedents(self, situation: str, top_k: int = 3) -> str:
@@ -201,7 +186,7 @@ class SearchService:
         try:
             keywords = self._extract_keywords_llm(situation)
             params = {"query": keywords, "display": 10, "sort": "sim"}
-            
+
             res = requests.get(self.news_url, headers=self._headers(), params=params, timeout=8)
             res.raise_for_status()
             items = res.json().get("items", [])
@@ -215,7 +200,7 @@ class SearchService:
                 desc = self._clean_html(it.get("description", ""))
                 link = it.get("link", "#")
                 lines.append(f"- **[{title}]({link})**\n  : {desc[:150]}...")
-            
+
             return "\n".join(lines)
         except Exception as e:
             return f"검색 중 오류: {str(e)}"
@@ -231,6 +216,7 @@ class DatabaseService:
             self.is_active = True
         except Exception:
             self.is_active = False
+            self.client = None
 
     def save_log(self, user_input, legal_basis, strategy, doc_data):
         if not self.is_active:
@@ -259,15 +245,23 @@ class LawOfficialService:
     국가법령정보센터(law.go.kr) 공식 API 연동
     1. 검색: 법령명 -> 법령 ID(MST) 추출
     2. 조회: 법령 ID -> 전체 조문 파싱 -> 특정 조문 검색
+
+    ✅ 변경점:
+    - get_law_text()가 (text, full_link) 튜플을 반환
+    - 성공 케이스에서도 full_link를 항상 확보
     """
     def __init__(self):
-        self.api_id = st.secrets["general"].get("LAW_API_ID")
+        g = st.secrets.get("general", {})
+        self.api_id = g.get("LAW_API_ID")
         self.base_url = "http://www.law.go.kr/DRF/lawSearch.do"
         self.service_url = "http://www.law.go.kr/DRF/lawService.do"
 
     def get_law_text(self, law_name, article_num=None):
+        """
+        return: (text: str, full_link: str)
+        """
         if not self.api_id:
-            return "⚠️ API ID(OC)가 설정되지 않았습니다."
+            return ("⚠️ API ID(OC)가 설정되지 않았습니다.", "")
 
         # 1) 법령 ID(MST) 검색
         try:
@@ -283,12 +277,19 @@ class LawOfficialService:
 
             law_node = root.find(".//law")
             if law_node is None:
-                return f"🔍 '{law_name}'에 대한 검색 결과가 없습니다."
+                return (f"🔍 '{law_name}'에 대한 검색 결과가 없습니다.", "")
 
-            mst_id = law_node.find("법령일련번호").text
-            full_link = law_node.find("법령상세링크").text
+            mst_id = (law_node.findtext("법령일련번호") or "").strip()
+            full_link = (law_node.findtext("법령상세링크") or "").strip()
+
+            # 링크 보정(스킴/도메인 누락 대비)
+            if full_link.startswith("/"):
+                full_link = "https://www.law.go.kr" + full_link
+            elif full_link.startswith("www."):
+                full_link = "https://" + full_link
+
         except Exception as e:
-            return f"API 검색 중 오류: {e}"
+            return (f"API 검색 중 오류: {e}", "")
 
         # 2) 상세 조문 가져오기
         try:
@@ -309,25 +310,35 @@ class LawOfficialService:
                 jo_content_tag = article.find("조문내용")
 
                 if jo_num_tag is not None and jo_content_tag is not None:
-                    current_num = jo_num_tag.text.strip()
+                    current_num = (jo_num_tag.text or "").strip()
 
                     if article_num and str(article_num) == current_num:
-                        target_text = f"[{law_name} 제{current_num}조 전문]\n" + _escape((jo_content_tag.text or "").strip())
+                        target_text = (
+                            f"[{law_name} 제{current_num}조 전문]\n"
+                            + _escape((jo_content_tag.text or "").strip())
+                        )
 
                         for hang in article.findall(".//항"):
                             hang_content = hang.find("항내용")
                             if hang_content is not None:
                                 target_text += f"\n  - {(hang_content.text or '').strip()}"
+
                         found = True
                         break
 
             if found:
-                return target_text
+                target_text += f"\n\n🔗 원문 보기: {full_link}"
+                return (target_text, full_link)
 
-            return f"✅ '{law_name}'이(가) 확인되었습니다.\n(상세 조문 자동 추출 실패 또는 전체 법령 참조)\n🔗 원문 보기: {full_link}"
+            msg = (
+                f"✅ '{law_name}'이(가) 확인되었습니다.\n"
+                f"(상세 조문 자동 추출 실패 또는 전체 법령 참조)\n"
+                f"🔗 원문 보기: {full_link}"
+            )
+            return (msg, full_link)
 
         except Exception as e:
-            return f"상세 법령 파싱 실패: {e}"
+            return (f"상세 법령 파싱 실패: {e}", full_link or "")
 
 
 # ==========================================
@@ -375,15 +386,28 @@ class LegalAgents:
             law_name = item.get("law_name", "관련법령")
             article_num = item.get("article_num")
 
-            real_law_text = law_api_service.get_law_text(law_name, article_num)
+            # ✅ 변경: (text, link) 튜플로 받기
+            real_law_text, law_link = law_api_service.get_law_text(law_name, article_num)
 
             error_keywords = ["검색 결과가 없습니다", "오류", "API ID", "실패"]
-            is_success = not any(k in real_law_text for k in error_keywords)
+            is_success = not any(k in (real_law_text or "") for k in error_keywords)
 
             if is_success:
                 api_success_count += 1
-                header = f"✅ **{idx+1}. {law_name} 제{article_num}조 (확인됨)**"
+
+                jo_txt = f"{article_num}" if article_num else "?"
+                if law_link:
+                    safe_link = _escape(law_link)
+                    header = (
+                        f'✅ <a href="{safe_link}" target="_blank" '
+                        f'style="color:#2563eb; text-decoration:none; font-weight:800;">'
+                        f'{idx+1}. {law_name} 제{jo_txt}조 (확인됨) ↗</a>'
+                    )
+                else:
+                    header = f"✅ **{idx+1}. {law_name} 제{jo_txt}조 (확인됨)**"
+
                 content = real_law_text
+
             else:
                 header = f"⚠️ **{idx+1}. {law_name} 제{article_num}조 (API 조회 실패)**"
                 content = "(국가법령정보센터에서 해당 조문을 찾지 못했습니다. 법령명이 정확한지 확인이 필요합니다.)"
@@ -402,7 +426,7 @@ Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
 당신이 알고 있는 지식을 바탕으로 가장 정확한 법령 정보를 작성하되,
 반드시 상단에 [AI 추론 결과]임을 명시하고 환각 가능성을 경고하시오.
 """
-            ai_fallback_text = llm_service.generate_text(prompt_fallback).strip()
+            ai_fallback_text = (llm_service.generate_text(prompt_fallback) or "").strip()
 
             return f"""⚠️ **[시스템 경고: API 조회 실패]**
 (국가법령정보센터 연결에 실패하여 AI의 지식 기반으로 답변을 생성합니다. **환각(Hallucination)** 가능성이 있으므로 법제처 확인이 필수입니다.)
@@ -426,7 +450,6 @@ Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
 위 정보를 종합하여 이 민원을 처리하기 위한 **대략적인 업무 처리 방향(Strategy)**을 수립하세요.
 **[중요] 서론(인사말, 공감 표현, "네, 알겠습니다" 등)을 절대 작성하지 마십시오.**
 
-    
 다음 3가지 항목 포함:
 1. 처리 방향
 2. 핵심 주의사항
@@ -574,26 +597,27 @@ def main():
             res = st.session_state["workflow_result"]
             st.markdown("---")
 
-            if "성공" in res["save_msg"]:
+            if "성공" in (res.get("save_msg") or ""):
                 st.success(f"✅ {res['save_msg']}")
             else:
-                st.error(f"❌ {res['save_msg']}")
+                st.error(f"❌ {res.get('save_msg','')}")
 
-            # ▼ 들여쓰기 레벨 1 (if "workflow_result" 내부)
             with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
                 col1, col2 = st.columns(2)
 
                 # ---------------------------------------------------------
-                # 1. 좌측: 적용 법령 (카드형 UI, 줄바꿈, 볼드체)
+                # 1) 좌측: 적용 법령 (✅ 클릭 시 새창으로 원문 열림)
                 # ---------------------------------------------------------
                 with col1:
-                    st.markdown("**📜 적용 법령**")
+                    st.markdown("**📜 적용 법령 (클릭 시 원문 새창 열림)**")
 
-                    raw_law = res["law"]
+                    raw_law = res.get("law", "")
 
                     cleaned_law = raw_law.replace("&lt;", "<").replace("&gt;", ">")
                     cleaned_law = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned_law)
                     cleaned_law = cleaned_law.replace("---", "<br><br>")
+                    # ✅ 줄바꿈 가시화(내용은 그대로, 표시만 정리)
+                    cleaned_law = cleaned_law.replace("\n", "<br>")
 
                     st.markdown(
                         f"""
@@ -616,12 +640,12 @@ def main():
                     )
 
                 # ---------------------------------------------------------
-                # 2. 우측: 관련 뉴스 (볼드체, 링크)
+                # 2) 우측: 관련 뉴스 (볼드체, 링크)
                 # ---------------------------------------------------------
                 with col2:
                     st.markdown("**🟩 관련 뉴스/사례**")
 
-                    raw_news = res["search"]
+                    raw_news = res.get("search", "")
 
                     news_body = raw_news.replace("# ", "").replace("## ", "")
                     news_body = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", news_body)
@@ -652,19 +676,14 @@ def main():
                         unsafe_allow_html=True
                     )
 
-            # ---------------------------------------------------------
-            # 3. 전략 섹션 (그냥 한 덩어리로 출력)
-            # ---------------------------------------------------------
             with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
-                st.markdown(res["strategy"])
+                st.markdown(res.get("strategy", ""))
 
-                
-                
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
-            doc = res["doc"]
-            meta = res["meta"]
+            doc = res.get("doc")
+            meta = res.get("meta") or {}
 
             if doc:
                 html_content = f"""
@@ -672,8 +691,8 @@ def main():
   <div class="stamp">직인생략</div>
   <div class="doc-header">{_escape(doc.get('title', '공 문 서'))}</div>
   <div class="doc-info">
-    <span>문서번호: {_escape(meta['doc_num'])}</span>
-    <span>시행일자: {_escape(meta['today_str'])}</span>
+    <span>문서번호: {_escape(meta.get('doc_num', ''))}</span>
+    <span>시행일자: {_escape(meta.get('today_str', ''))}</span>
     <span>수신: {_escape(doc.get('receiver', '수신자 참조'))}</span>
   </div>
   <hr style="border: 1px solid black; margin-bottom: 30px;">
