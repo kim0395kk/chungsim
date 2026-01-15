@@ -395,6 +395,54 @@ st.markdown(
         margin-bottom: var(--space-md) !important;
         box-shadow: var(--shadow-sm) !important;
     }
+    
+    /* ====================== */
+    /* Chat Input - Enhanced Visibility */
+    /* ====================== */
+    .stChatInputContainer {
+        background: linear-gradient(135deg, var(--primary-50) 0%, white 100%) !important;
+        border: 2px solid var(--primary-500) !important;
+        border-radius: var(--radius-xl) !important;
+        padding: var(--space-md) !important;
+        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1), var(--shadow-lg) !important;
+        margin-top: var(--space-lg) !important;
+        position: relative !important;
+    }
+    
+    .stChatInputContainer::before {
+        content: '💬 여기에 후속 질문을 입력하세요';
+        position: absolute;
+        top: -1.75rem;
+        left: 0;
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: var(--primary-700);
+        background: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: var(--radius-md);
+        border: 2px solid var(--primary-200);
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .stChatInputContainer textarea {
+        border: 2px solid var(--primary-300) !important;
+        border-radius: var(--radius-lg) !important;
+        background: white !important;
+        font-size: 1rem !important;
+        padding: var(--space-md) !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stChatInputContainer textarea:focus {
+        border-color: var(--primary-600) !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+        transform: scale(1.01);
+    }
+    
+    .stChatInputContainer textarea::placeholder {
+        color: var(--primary-400) !important;
+        font-weight: 500 !important;
+    }
 
     /* ====================== */
     /* Headers & Text */
@@ -1676,10 +1724,46 @@ def main():
                 st.markdown(m["content"])
 
         if remain == 0:
-            st.warning("후속 질문 한도(5회)를 모두 사용했습니다.")
+            st.markdown("""
+                <div style='background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); 
+                            padding: 1rem; border-radius: 12px; border-left: 4px solid #ef4444;
+                            text-align: center; margin: 1.5rem 0;'>
+                    <p style='margin: 0; color: #991b1b; font-weight: 600; font-size: 1rem;'>
+                        ⚠️ 후속 질문 한도(5회)를 모두 사용했습니다.
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
             return
 
-        q = st.chat_input("후속 질문 (최대 5회)")
+        # Add prominent callout box above chat input
+        st.markdown(f"""
+            <div style='background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); 
+                        padding: 1.25rem; border-radius: 12px; 
+                        border: 2px solid #3b82f6;
+                        margin: 1.5rem 0 1rem 0;
+                        box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.2);
+                        animation: pulse-border 2s ease-in-out infinite;'>
+                <div style='display: flex; align-items: center; gap: 1rem;'>
+                    <div style='font-size: 2.5rem; line-height: 1;'>💬</div>
+                    <div style='flex: 1;'>
+                        <p style='margin: 0 0 0.25rem 0; color: #1e40af; font-weight: 700; font-size: 1.1rem;'>
+                            추가 질문이 있으신가요?
+                        </p>
+                        <p style='margin: 0; color: #3b82f6; font-size: 0.9rem;'>
+                            아래 입력창에 질문을 입력해주세요 (남은 횟수: <strong>{remain}/{MAX_FOLLOWUP_Q}</strong>)
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <style>
+                @keyframes pulse-border {{
+                    0%, 100% {{ border-color: #3b82f6; }}
+                    50% {{ border-color: #60a5fa; }}
+                }}
+            </style>
+        """, unsafe_allow_html=True)
+        
+        q = st.chat_input("💭 후속 질문을 입력하세요... (Enter로 전송)")
         if not q:
             return
 
