@@ -1942,7 +1942,7 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            with st.expander("📋 누락정보/증빙/리스크/다음행동 보기", expanded=False):
+        with st.expander("📋 누락정보/증빙/리스크/다음행동 보기", expanded=False):
                 st.markdown("**추가 확인 질문**")
                 for x in a.get("required_facts", []): st.write("- ", x)
                 st.markdown("**필요 증빙**")
