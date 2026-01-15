@@ -1542,128 +1542,80 @@ def admin_fetch_events(sb, limit: int = 300) -> List[dict]:
         st.error(f"관리자 조회 실패(app_events): {e}")
         return []
 
+# =========================================================
+# 8) 관리자 UI 로직 (정상화 버전)
+# =========================================================
+
 def render_master_dashboard(sb):
     st.markdown("## 🏛️ 관리자 운영 마스터 콘솔")
 
+    # 1. 관리자 권한 및 모드 체크
     if not is_admin_user(st.session_state.get("user_email", "")):
         st.warning("관리자만 접근 가능합니다.")
         return
-
     if not st.session_state.get("admin_mode", False):
         st.info("사이드바에서 **관리자모드 켜기**를 활성화하세요.")
         return
 
-    if is_admin_user(st.session_state.get("user_email","")) and st.session_state.get("admin_mode", False):
-    if st.button("❌ 기록 삭제", key=f"del_{row_id}"):
-        sb.table("work_archive").delete().eq("id", row_id).execute()
-        st.rerun()
-    
-
-    
-    if pd is None:
-        st.warning("pandas가 없어 차트/집계를 간소화합니다. requirements.txt에 `pandas`를 추가 권장.")
+    # 2. 데이터 가져오기
     data = admin_fetch_work_archive(sb, limit=5000)
     sessions = admin_fetch_sessions(sb, minutes=5)
     events = admin_fetch_events(sb, limit=200)
 
-    # ---- 상단 KPI ----
-    total_runs = len(data)
-    online_now = len(sessions)
+    if not data:
+        st.info("누적된 분석 데이터가 없습니다.")
+        return
 
-    if pd and data:
+    # 3. 통계 계산 (가입자 수 포함)
+    if pd:
         df = pd.DataFrame(data)
-        # 전처리
         df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
-        df["date"] = df["created_at"].dt.date
-        df["user_email"] = df["user_email"].fillna("(anon)")
-        df["app_mode"] = df["app_mode"].fillna("신속")
-        df["token_usage"] = pd.to_numeric(df["token_usage"], errors="coerce").fillna(0)
-        df["execution_time"] = pd.to_numeric(df["execution_time"], errors="coerce").fillna(0)
-        df["search_count"] = pd.to_numeric(df["search_count"], errors="coerce").fillna(0)
-
-        top_user = df["user_email"].value_counts().index[0] if not df.empty else "-"
+        
+        total_runs = len(df)
+        total_users = df["user_email"].nunique() # 🟢 중복 제외 가입자(이용자) 수
         total_tokens = int(df["token_usage"].sum())
-        avg_time = float(df["execution_time"].mean()) if not df.empty else 0.0
+        avg_time = float(df["execution_time"].mean())
         total_search = int(df["search_count"].sum())
-    else:
-        top_user = "-"
-        total_tokens = 0
-        avg_time = 0.0
-        total_search = 0
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("🟢 현재 접속(5분)", f"{online_now}")
-    c2.metric("📦 누적 실행", f"{total_runs:,}")
-    c3.metric("🧾 누적 토큰(추정)", f"{total_tokens:,}")
-    c4.metric("⏱️ 평균 소요시간", f"{avg_time:.2f}s")
-    c5.metric("🔎 총 검색(뉴스+법령)", f"{total_search:,}")
-
-    st.divider()
-
-    # ---- 차트 ----
-    if pd and data:
-        left, right = st.columns(2)
-
-        with left:
-            st.subheader("📈 일자별 토큰 사용량")
-            tok = df.groupby("date")["token_usage"].sum().sort_index()
-            st.line_chart(tok)
-
-        with right:
-            st.subheader("📊 모드(A/B/신속/정밀) 사용 비중")
-            mode_counts = df["app_mode"].value_counts()
-            st.bar_chart(mode_counts)
-
-        left2, right2 = st.columns(2)
-        with left2:
-            st.subheader("👤 사용자별 실행 Top 10")
-            user_counts = df["user_email"].value_counts().head(10)
-            st.bar_chart(user_counts)
-
-        with right2:
-            st.subheader("🤖 모델 사용 분포")
-            m = df["model_used"].fillna("(unknown)").value_counts().head(10)
-            st.bar_chart(m)
+        # 상단 핵심 지표 (KPI)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("🟢 실시간(5분)", f"{len(sessions)}")
+        c2.metric("👥 총 이용자", f"{total_users}명")
+        c3.metric("📦 누적 분석", f"{total_runs:,}")
+        c4.metric("🧾 총 토큰", f"{total_tokens:,}")
+        c5.metric("⏱️ 평균속도", f"{avg_time:.1f}s")
 
         st.divider()
 
-        # ---- CSV 다운로드 ----
-        st.subheader("⬇️ 데이터 내보내기")
-        csv = df.sort_values("created_at", ascending=False).to_csv(index=False).encode("utf-8-sig")
-        st.download_button("work_archive CSV 다운로드", data=csv, file_name="work_archive.csv", mime="text/csv")
+        # 4. 차트 (Google Dashboard 스타일)
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.subheader("📈 토큰 사용 추이")
+            df["date"] = df["created_at"].dt.date
+            st.line_chart(df.groupby("date")["token_usage"].sum())
+        with col_r:
+            st.subheader("📊 모드별 사용 비중")
+            st.bar_chart(df["app_mode"].value_counts())
 
-    else:
-        st.info("표시할 데이터가 없습니다(또는 pandas 미설치).")
+        st.divider()
 
-    st.divider()
+        # 5. 상세 기록 관리 및 삭제 버튼 (에러 지점 수정됨)
+        st.subheader("📝 상세 활동 모니터링")
+        for arc in data[:30]:
+            row_id = arc['id']
+            with st.expander(f"[{arc['created_at'][:16]}] {arc['user_email'] or '익명'} | {arc['app_mode']}"):
+                st.write(f"**지시 내용:** {arc['prompt']}")
+                st.caption(f"모델: {arc.get('model_used')} | ID: {row_id}")
+                
+                # 🟢 삭제 버튼 (들여쓰기 및 권한 로직 수정 완료)
+                if st.button("🗑️ 기록 삭제", key=f"del_{row_id}"):
+                    sb.table("work_archive").delete().eq("id", row_id).execute()
+                    st.success("데이터가 삭제되었습니다.")
+                    st.rerun()
 
-    # ---- 실시간 접속자 ----
-    st.subheader("🟢 최근 5분 접속 세션")
-    if sessions:
-        st.write(f"최근 5분 내 last_seen 기준 세션: **{len(sessions)}**")
-        st.dataframe(sessions, use_container_width=True)
-    else:
-        st.caption("최근 5분 내 활성 세션이 없습니다.")
-
-    st.divider()
-
-    # ---- 이벤트 로그 ----
-    st.subheader("🧾 최근 이벤트 로그")
-    if events:
-        st.dataframe(events, use_container_width=True)
-    else:
-        st.caption("이벤트 로그가 없습니다.")
-
-def render_lawbot_button(url: str):
-    st.markdown(
-        f"""
-<a class="lawbot-btn" href="{_escape(url)}" target="_blank">
-  🤖 법령 AI (Lawbot) 실행 — 법령·규칙·서식 더 찾기
-  <span class="lawbot-sub">클릭하면 검색창에 키워드가 들어간 상태로 새창이 열립니다</span>
-</a>
-""",
-        unsafe_allow_html=True,
-    )
+# =========================================================
+# 9) 메인 실행 함수 (탭 분리 로직 복구)
+# =========================================================
 
 def main():
     sb = get_supabase()
@@ -1676,52 +1628,56 @@ def main():
             log_event(sb, "app_open", meta={"ver": APP_VERSION})
 
         sidebar_auth(sb)
+        # 실행 모드 선택기 추가
+        if "app_mode" not in st.session_state:
+            st.session_state.app_mode = "신속"
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("## ⚙️ 실행 모드")
+        st.session_state.app_mode = st.sidebar.selectbox(
+            "모드 선택", ["신속", "정밀", "A", "B"],
+            index=["신속", "정밀", "A", "B"].index(st.session_state.app_mode)
+        )
         render_history_list(sb)
     else:
-        st.sidebar.error("Supabase 연결 정보(secrets)가 없습니다.")
-        st.sidebar.caption("SUPABASE_URL / SUPABASE_ANON_KEY 필요")
+        st.sidebar.error("Supabase 연결 정보가 없습니다.")
 
-    st.markdown("""# 관리자면 탭 제공
-if sb and is_admin_user(st.session_state.get("user_email","")) and st.session_state.get("admin_mode", False):
-    tabs = st.tabs(["🧠 업무 처리", "🏛️ 마스터 대시보드"])
-    with tabs[1]:
-        render_master_dashboard(sb)
-    with tabs[0]:
-        pass  # 아래 기존 UI가 그대로 나오게
+    # 🟢 [핵심] 관리자 탭 분리 로직 (문자열 주석에서 코드로 꺼냄)
+    is_admin = is_admin_user(st.session_state.get("user_email", ""))
+    admin_active = st.session_state.get("admin_mode", False)
 
-        <div style='text-align: center; padding: 2rem 0 3rem 0;'>
-            <h1 style='font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem; 
-                       background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
-                       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-                       background-clip: text;'>
+    if sb and is_admin and admin_active:
+        tab1, tab2 = st.tabs(["🧠 업무 처리", "🏛️ 마스터 대시보드"])
+        with tab1:
+            render_main_workflow_ui(sb)
+        with tab2:
+            render_master_dashboard(sb)
+    else:
+        render_main_workflow_ui(sb)
+
+def render_main_workflow_ui(sb):
+    """기존의 업무 지시 화면 전체"""
+    st.markdown(f"""
+        <div style='text-align: center; padding: 1rem 0;'>
+            <h1 style='font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'>
                 🏢 AI 행정관 Pro
             </h1>
-            <p style='font-size: 1.1rem; color: #4b5563; font-weight: 500; margin-bottom: 0.75rem;'>
-                충주시청 스마트 행정 솔루션
-            </p>
-            <p style='font-size: 0.9rem; color: #6b7280;'>
-                문의 <a href='mailto:kim0395kk@korea.kr' style='color: #2563eb; text-decoration: none;'>kim0395kk@korea.kr</a> | Govable AI 에이전트
-            </p>
+            <p style='color: #4b5563;'>충주시청 스마트 행정 솔루션</p>
         </div>
     """, unsafe_allow_html=True)
 
+    # 시스템 상태 표시 (기존 코드 유지)
     ai_ok = "✅ AI" if llm_service.is_available() else "❌ AI"
     law_ok = "✅ LAW" if bool(get_general_secret("LAW_API_ID")) else "❌ LAW"
     nv_ok = "✅ NEWS" if bool(get_general_secret("NAVER_CLIENT_ID")) else "❌ NEWS"
     db_ok = "✅ DB" if sb else "❌ DB"
     
     st.markdown(f"""
-        <div style='text-align: center; padding: 0.75rem 1.5rem; background: white; 
-                    border-radius: 12px; margin-bottom: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-                    border-left: 4px solid #2563eb;'>
-            <span style='font-size: 0.9rem; color: #374151; font-weight: 600;'>
-                시스템 상태: {ai_ok} · {law_ok} · {nv_ok} · {db_ok}
-            </span>
-            <span style='font-size: 0.85rem; color: #9ca3af; margin-left: 1rem;'>
-                v{APP_VERSION}
-            </span>
+        <div style='text-align: center; padding: 0.5rem; background: white; border-radius: 12px; margin-bottom: 1rem; border-left: 4px solid #2563eb;'>
+            <span style='font-size: 0.9rem; font-weight: 600;'>시스템 상태: {ai_ok} · {law_ok} · {nv_ok} · {db_ok}</span>
         </div>
     """, unsafe_allow_html=True)
+
+    # (이하 기존의 col_left, col_right 로직 전체를 여기에 배치합니다)
 
     col_left, col_right = st.columns([1, 1.15], gap="large")
 
