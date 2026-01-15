@@ -629,20 +629,19 @@ class LLMService:
             return "System Error"
 
     def generate_text(self, prompt: str) -> str:
-    try:
-        text, used = self._try_gemini_text(prompt)
-        if text:
-            st.session_state["last_model_used"] = used
-            return text
-    except Exception:
-        pass
-    if self.groq_client:
-        out = self._generate_groq(prompt)
-        st.session_state["last_model_used"] = "llama-3.3-70b-versatile(groq)"
-        return out
-    st.session_state["last_model_used"] = None
-    return "시스템 오류: AI 모델 연결 실패"
-
+        try:
+            text, used = self._try_gemini_text(prompt)
+            if text:
+                st.session_state["last_model_used"] = used
+                return text
+        except Exception:
+            pass
+        if self.groq_client:
+            out = self._generate_groq(prompt)
+            st.session_state["last_model_used"] = "llama-3.3-70b-versatile(groq)"
+            return out
+        st.session_state["last_model_used"] = None
+        return "시스템 오류: AI 모델 연결 실패"
     def generate_json(self, prompt: str) -> Optional[Any]:
         strict = prompt + "\n\n반드시 JSON만 출력. 다른 텍스트 금지."
         text = self.generate_text(strict)
