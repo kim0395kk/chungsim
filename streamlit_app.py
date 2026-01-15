@@ -1918,20 +1918,21 @@ def main():
             )
             return
 
+        
         res = st.session_state.workflow_result
 
-            pack = res.get("lawbot_pack") or {}
-            if pack.get("url"):
-                render_lawbot_button(pack["url"])
+        pack = res.get("lawbot_pack") or {}
+        if pack.get("url"):
+            render_lawbot_button(pack["url"])
 
-            st.markdown("""
-                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
-                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
-                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
-                        🧠 케이스 분석
-                    </h3>
-                </div>
-            """, unsafe_allow_html=True)
+        st.markdown("""
+            <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                    🧠 케이스 분석
+                </h3>
+            </div>
+        """, unsafe_allow_html=True)
             
             a = res.get("analysis", {})
             st.markdown(f"""
