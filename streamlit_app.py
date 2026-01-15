@@ -1,6 +1,5 @@
 # streamlit_app.py
 # -*- coding: utf-8 -*-
-
 import json
 import re
 import time
@@ -35,21 +34,109 @@ try:
 except Exception:
     create_client = None
 
-# ==========================
-# Global Settings
-# ==========================
+
+# ==========================================
+# 0) Settings
+# ==========================================
 MAX_FOLLOWUP_Q = 5
 LAW_BOT_SEARCH_URL = "https://www.law.go.kr/LSW/ais/searchList.do?query="
+
 ADMIN_EMAIL = "kim0395kk@korea.kr"
 
-# ==========================
-# Page / Styles
-# ==========================
+
+def make_lawbot_url(query: str) -> str:
+    return LAW_BOT_SEARCH_URL + urllib.parse.quote((query or "").strip())
+
+
+def _safe_json_loads(text: str) -> Optional[Any]:
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    try:
+        m = re.search(r"\{.*\}|\[.*\]", text, re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+    except Exception:
+        return None
+    return None
+
+
+def _strip_html(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    return text
+
+
+def _coerce_str(x) -> str:
+    if x is None:
+        return ""
+    if isinstance(x, str):
+        return x
+    return str(x)
+
+
+def _normalize_receiver(receiver: str) -> str:
+    r = (receiver or "").strip()
+    r = re.sub(r"^\s*수신\s*[:：]\s*", "", r)
+    r = re.sub(r"^\s*수신자\s*[:：]\s*", "", r)
+    return r.strip() if r.strip() else "수신자 참조"
+
+
+def normalize_doc(doc: Optional[dict], meta: dict, situation: str, legal_basis: str, strategy: str) -> dict:
+    """
+    ✅ 공문 조판이 '절대' 깨지지 않게 강제 보정.
+    LLM JSON 실패(None/누락/형식오류)여도 최소 공문 구조 생성.
+    """
+    doc = doc if isinstance(doc, dict) else {}
+
+    title = _coerce_str(doc.get("title")).strip() or "공 문 서"
+    receiver = _normalize_receiver(_coerce_str(doc.get("receiver")).strip())
+
+    body_paragraphs = doc.get("body_paragraphs")
+    if isinstance(body_paragraphs, str):
+        body_paragraphs = [body_paragraphs]
+    if not isinstance(body_paragraphs, list):
+        body_paragraphs = []
+
+    # list 안에 None/숫자 등 섞여도 문자열화
+    body_paragraphs = [(_coerce_str(p).strip()) for p in body_paragraphs if _coerce_str(p).strip()]
+
+    department_head = _coerce_str(doc.get("department_head")).strip() or "행정기관장 OOO"
+
+    # 본문이 비면 fallback 본문 자동 생성
+    if not body_paragraphs:
+        today_str = meta.get("today_str", datetime.now().strftime("%Y. %m. %d."))
+        deadline_str = meta.get("deadline_str", (datetime.now() + timedelta(days=15)).strftime("%Y. %m. %d."))
+        body_paragraphs = [
+            "1. 귀하의 민원사항에 대하여 아래와 같이 검토 결과를 알려드립니다.",
+            f"2. 본 건은 다음 법령을 근거로 처리합니다.\n{_strip_html(legal_basis)[:1200]}",
+            "3. 처리 절차 및 주요 사항은 다음과 같습니다.",
+            _strip_html(strategy)[:1200] if strategy else " - (처리 방향 요약이 비어 있습니다. 추가 확인이 필요합니다.)",
+            f"4. 의견 제출 기한: {deadline_str}까지 (시행일: {today_str})",
+            "5. 본 문서는 AI 초안이며, 최종 결재 전 담당자가 반드시 검토합니다.",
+        ]
+
+    return {
+        "title": title,
+        "receiver": receiver,
+        "body_paragraphs": body_paragraphs,
+        "department_head": department_head,
+    }
+
+
+# ==========================================
+# 1) Configuration & Styles
+# ==========================================
 st.set_page_config(
     layout="wide",
     page_title="AI Bureau: The Legal Glass",
     page_icon="⚖️",
-    initial_sidebar_state="collapsed",  # ✅ 사이드바 기본 접힘(사용자도 토글로 펼침)
+    initial_sidebar_state="collapsed",  # ✅ 사이드바 접고/펼 수 있게 (초기 접힘)
 )
 
 st.markdown(
@@ -69,7 +156,6 @@ st.markdown(
         color: #111;
         line-height: 1.6;
         position: relative;
-        overflow: hidden;
     }
 
     .doc-header { text-align: center; font-size: 22pt; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px; }
@@ -97,90 +183,192 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ==========================
-# Utils
-# ==========================
-def make_lawbot_url(query: str) -> str:
-    return LAW_BOT_SEARCH_URL + urllib.parse.quote((query or "").strip())
 
-def _safe_json_loads(text: str) -> Optional[Any]:
-    if not text:
-        return None
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    try:
-        m = re.search(r"\{.*\}|\[.*\]", text, re.DOTALL)
-        if m:
-            return json.loads(m.group(0))
-    except Exception:
-        return None
-    return None
-
-def _strip_html(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    return text.strip()
-
-def _get_secret(path1: str, path2: str = "") -> Optional[str]:
-    """secrets 키가 old/new 섞여 있어도 안전하게 읽기"""
-    try:
-        if path2:
-            return st.secrets.get(path1, {}).get(path2)
-        return st.secrets.get(path1)
-    except Exception:
-        return None
-
-def _is_korea_email(email: str) -> bool:
-    return bool(email) and email.lower().endswith("@korea.kr")
-
-# ==========================
-# Supabase Auth + Client
-# ==========================
-def get_supabase_base():
-    """anon 기반 supabase client (로그인 전/후 공통)"""
+# ==========================================
+# 2) Supabase Auth + Archive
+# ==========================================
+def get_supabase():
     if not create_client:
         return None
-
     sb = st.secrets.get("supabase", {})
-    # new style
-    url = sb.get("SUPABASE_URL") or st.secrets.get("SUPABASE_URL")
-    anon = sb.get("SUPABASE_ANON_KEY") or sb.get("SUPABASE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")
-
+    url = sb.get("SUPABASE_URL")
+    anon = sb.get("SUPABASE_ANON_KEY") or sb.get("SUPABASE_KEY")
     if not (url and anon):
         return None
-    return create_client(url, anon)
-
-def get_supabase_authed():
-    """
-    로그인한 유저 토큰으로 RLS 적용되는 client 반환
-    (없으면 base client 반환)
-    """
-    sb = get_supabase_base()
-    if not sb:
+    try:
+        return create_client(url, anon)
+    except Exception:
         return None
 
-    if st.session_state.get("logged_in") and st.session_state.get("sb_access_token"):
+
+supabase = get_supabase()
+
+
+def restore_supabase_session():
+    if not supabase:
+        return
+    at = st.session_state.get("sb_access_token")
+    rt = st.session_state.get("sb_refresh_token")
+    if at and rt:
         try:
-            # supabase-py v2: set_session(access, refresh)
-            sb.auth.set_session(st.session_state["sb_access_token"], st.session_state.get("sb_refresh_token", ""))
+            supabase.auth.set_session(at, rt)
         except Exception:
-            # fallback: postgrest auth
+            pass
+
+
+def set_session_from_auth(res):
+    session = getattr(res, "session", None)
+    if session is None:
+        session = (getattr(res, "data", None) or {}).get("session")
+
+    if not session:
+        return False
+
+    access_token = getattr(session, "access_token", None) or (session.get("access_token") if isinstance(session, dict) else None)
+    refresh_token = getattr(session, "refresh_token", None) or (session.get("refresh_token") if isinstance(session, dict) else None)
+    if not access_token or not refresh_token:
+        return False
+
+    st.session_state["sb_access_token"] = access_token
+    st.session_state["sb_refresh_token"] = refresh_token
+    st.session_state["logged_in"] = True
+    return True
+
+
+def get_current_user_email() -> str:
+    # 세션 상태 우선, 실패하면 supabase.auth.get_user()
+    e = st.session_state.get("user_email") or ""
+    if e:
+        return e
+    if not supabase:
+        return ""
+    try:
+        u = supabase.auth.get_user()
+        # 버전별 반환차이 대응
+        user_obj = getattr(u, "user", None) or getattr(u, "data", None) or u
+        email = getattr(user_obj, "email", None) or (user_obj.get("email") if isinstance(user_obj, dict) else None)
+        return email or ""
+    except Exception:
+        return ""
+
+
+def is_admin_email(email: str) -> bool:
+    return (email or "").strip().lower() == ADMIN_EMAIL.lower()
+
+
+def logout():
+    if supabase:
+        try:
+            supabase.auth.sign_out()
+        except Exception:
+            pass
+    for k in ["sb_access_token", "sb_refresh_token", "logged_in", "user_email", "signup_step", "pending_email"]:
+        if k in st.session_state:
+            del st.session_state[k]
+
+
+class ArchiveService:
+    def __init__(self, sb_client):
+        self.sb = sb_client
+
+    def is_ready(self) -> bool:
+        return self.sb is not None
+
+    def insert_case(self, payload: dict) -> Tuple[bool, str, Optional[str]]:
+        """
+        ✅ 로그인 상태에서만 저장 (RLS가 auth.uid 필요)
+        """
+        if not self.sb:
+            return False, "DB 미연결", None
+        try:
+            resp = self.sb.table("work_archive").insert({
+                "title": payload.get("title"),
+                "situation": payload.get("situation"),
+                "payload": payload,
+                # user_id/user_email은 DB 트리거가 자동 세팅
+            }).execute()
+            inserted_id = None
             try:
-                sb.postgrest.auth(st.session_state["sb_access_token"])
+                data = getattr(resp, "data", None) or []
+                if isinstance(data, list) and data:
+                    inserted_id = data[0].get("id")
             except Exception:
-                pass
-    return sb
+                inserted_id = None
+            return True, "DB 저장 성공", inserted_id
+        except Exception as e:
+            return False, f"DB 저장 실패: {e}", None
 
-def is_admin_user() -> bool:
-    return (st.session_state.get("user_email") or "").lower() == ADMIN_EMAIL.lower()
+    def update_case(self, case_id: str, payload: dict) -> Tuple[bool, str]:
+        if not self.sb:
+            return False, "DB 미연결"
+        try:
+            self.sb.table("work_archive").update({
+                "title": payload.get("title"),
+                "situation": payload.get("situation"),
+                "payload": payload,
+            }).eq("id", case_id).execute()
+            return True, "DB 업데이트 성공"
+        except Exception as e:
+            return False, f"DB 업데이트 실패: {e}"
 
-# ==========================
-# LLM / Search / Law API (기존 유지 + 안정화)
-# ==========================
+    def delete_case(self, case_id: str) -> Tuple[bool, str]:
+        if not self.sb:
+            return False, "DB 미연결"
+        try:
+            self.sb.table("work_archive").delete().eq("id", case_id).execute()
+            return True, "삭제 완료"
+        except Exception as e:
+            return False, f"삭제 실패: {e}"
+
+    def list_cases(self, limit: int = 80) -> List[dict]:
+        if not self.sb:
+            return []
+        try:
+            resp = (self.sb.table("work_archive")
+                    .select("id, created_at, title, situation, user_email")
+                    .order("created_at", desc=True)
+                    .limit(limit)
+                    .execute())
+            return getattr(resp, "data", None) or []
+        except Exception:
+            return []
+
+    def get_case(self, case_id: str) -> Optional[dict]:
+        if not self.sb:
+            return None
+        try:
+            resp = (self.sb.table("work_archive")
+                    .select("*")
+                    .eq("id", case_id)
+                    .limit(1)
+                    .execute())
+            data = getattr(resp, "data", None) or []
+            return data[0] if data else None
+        except Exception:
+            return None
+
+
+archive = ArchiveService(supabase)
+
+# restore session on every rerun
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+if "user_email" not in st.session_state:
+    st.session_state["user_email"] = ""
+if "signup_step" not in st.session_state:
+    st.session_state["signup_step"] = 0  # 0메일, 1OTP, 2비번설정
+if "pending_email" not in st.session_state:
+    st.session_state["pending_email"] = ""
+
+restore_supabase_session()
+if st.session_state.get("logged_in"):
+    # 보강: 이메일 보정
+    st.session_state["user_email"] = get_current_user_email() or st.session_state.get("user_email", "")
+
+
+# ==========================================
+# 3) Infrastructure Services (LLM/News/Law API)
+# ==========================================
 class LLMService:
     def __init__(self):
         g = st.secrets.get("general", {})
@@ -233,7 +421,7 @@ class LLMService:
             )
             return (completion.choices[0].message.content or "").strip()
         except Exception:
-            return "System Error"
+            return ""
 
     def generate_text(self, prompt: str) -> str:
         try:
@@ -244,13 +432,17 @@ class LLMService:
             pass
 
         if self.groq_client:
-            return self._generate_groq(prompt)
+            t = self._generate_groq(prompt)
+            if t:
+                return t
 
         return "시스템 오류: AI 모델 연결 실패"
 
     def generate_json(self, prompt: str) -> Optional[Any]:
-        text = self.generate_text(prompt + "\n\n반드시 JSON만 출력. 다른 텍스트 금지.")
+        json_prompt = prompt + "\n\n반드시 JSON만 출력. 다른 텍스트 금지."
+        text = self.generate_text(json_prompt)
         return _safe_json_loads(text)
+
 
 class SearchService:
     def __init__(self):
@@ -260,7 +452,10 @@ class SearchService:
         self.news_url = "https://openapi.naver.com/v1/search/news.json"
 
     def _headers(self):
-        return {"X-Naver-Client-Id": self.client_id, "X-Naver-Client-Secret": self.client_secret}
+        return {
+            "X-Naver-Client-Id": self.client_id,
+            "X-Naver-Client-Secret": self.client_secret,
+        }
 
     def _clean_html(self, s: str) -> str:
         if not s:
@@ -269,10 +464,10 @@ class SearchService:
         s = s.replace("&quot;", '"').replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
         return s.strip()
 
-    def _extract_keywords_llm(self, situation: str, llm: LLMService) -> str:
+    def _extract_keywords_llm(self, situation: str) -> str:
         prompt = f"상황: '{situation}'\n뉴스 검색을 위한 핵심 키워드 2~3개만 콤마로 구분해 출력."
         try:
-            res = (llm.generate_text(prompt) or "").strip()
+            res = (llm_service.generate_text(prompt) or "").strip()
             res = re.sub(r'[".?]', "", res)
             return res
         except Exception:
@@ -307,9 +502,10 @@ class SearchService:
         except Exception as e:
             return f"검색 중 오류: {str(e)}"
 
-    def search_precedents(self, situation: str, llm: LLMService, top_k: int = 3) -> str:
-        keywords = self._extract_keywords_llm(situation, llm)
+    def search_precedents(self, situation: str, top_k: int = 3) -> str:
+        keywords = self._extract_keywords_llm(situation)
         return self.search_news(keywords, top_k=top_k)
+
 
 class LawOfficialService:
     def __init__(self):
@@ -351,7 +547,7 @@ class LawOfficialService:
 
         try:
             if not mst_id:
-                msg = f"✅ '{law_name}' 확인\n(법령일련번호(MST) 추출 실패)\n🔗 현행 원문: {current_link or '-'}"
+                msg = f"✅ '{law_name}' 확인\n(MST 추출 실패)\n🔗 현행 원문: {current_link or '-'}"
                 return (msg, current_link) if return_link else msg
 
             detail_params = {"OC": self.api_id, "target": "law", "type": "XML", "MST": mst_id}
@@ -380,156 +576,18 @@ class LawOfficialService:
             msg = f"상세 법령 파싱 실패: {e}"
             return (msg, current_link) if return_link else msg
 
-# ==========================
-# Database Service (RLS + Restore)
-# ==========================
-class DatabaseService:
-    def __init__(self):
-        self.mode = "off"
-        self.is_active = False
 
-        sb = get_supabase_base()
-        if sb:
-            self.is_active = True
-            self.mode = "anon"
-
-    def _pack_summary(self, res: dict, followup: dict) -> dict:
-        return {
-            "meta": res.get("meta"),
-            "strategy": res.get("strategy"),
-            "search_initial": res.get("search"),
-            "law_initial": res.get("law"),
-            "document_content": res.get("doc"),
-            "lawbot_pack": res.get("lawbot_pack", {}),
-            "followup": followup,
-        }
-
-    def insert_initial_report(self, res: dict) -> dict:
-        sb = get_supabase_authed()
-        if not sb:
-            return {"ok": False, "msg": "DB 미연결(슈파베이스 설정 없음)", "id": None}
-
-        if not st.session_state.get("logged_in"):
-            return {"ok": False, "msg": "로그인 필요(저장 건너뜀)", "id": None}
-
-        try:
-            followup = {"count": 0, "messages": [], "extra_context": ""}
-            data = {
-                "situation": res.get("situation", ""),
-                "law_name": res.get("law", ""),
-                "summary": self._pack_summary(res, followup),
-            }
-            resp = sb.table("law_reports").insert(data).execute()
-            inserted_id = None
-            if hasattr(resp, "data") and resp.data and isinstance(resp.data, list):
-                inserted_id = resp.data[0].get("id")
-            return {"ok": True, "msg": "DB 저장 성공", "id": inserted_id}
-        except Exception as e:
-            return {"ok": False, "msg": f"DB 저장 실패: {e}", "id": None}
-
-    def update_followup(self, report_id, res: dict, followup: dict) -> dict:
-        sb = get_supabase_authed()
-        if not sb:
-            return {"ok": False, "msg": "DB 미연결(업데이트 건너뜀)"}
-        if not st.session_state.get("logged_in"):
-            return {"ok": False, "msg": "로그인 필요(업데이트 건너뜀)"}
-
-        summary = self._pack_summary(res, followup)
-
-        if report_id:
-            try:
-                sb.table("law_reports").update({"summary": summary}).eq("id", report_id).execute()
-                return {"ok": True, "msg": "DB 업데이트 성공"}
-            except Exception:
-                pass
-
-        try:
-            data = {
-                "situation": res.get("situation", ""),
-                "law_name": res.get("law", ""),
-                "summary": summary,
-            }
-            sb.table("law_reports").insert(data).execute()
-            return {"ok": True, "msg": "DB 업데이트 실패 → 신규 저장(fallback) 완료"}
-        except Exception as e:
-            return {"ok": False, "msg": f"DB 업데이트/저장 실패: {e}"}
-
-    def list_reports(self, limit: int = 50) -> List[dict]:
-        sb = get_supabase_authed()
-        if not sb or not st.session_state.get("logged_in"):
-            return []
-        try:
-            resp = (
-                sb.table("law_reports")
-                .select("id, created_at, situation, law_name, summary, user_email")
-                .order("created_at", desc=True)
-                .limit(limit)
-                .execute()
-            )
-            return resp.data or []
-        except Exception:
-            return []
-
-    def delete_report(self, report_id: str) -> bool:
-        sb = get_supabase_authed()
-        if not sb or not st.session_state.get("logged_in"):
-            return False
-        try:
-            sb.table("law_reports").delete().eq("id", report_id).execute()
-            return True
-        except Exception:
-            return False
-
-    def update_report_basic(self, report_id: str, situation: str, law_name: str, summary: Optional[dict] = None) -> bool:
-        sb = get_supabase_authed()
-        if not sb or not st.session_state.get("logged_in"):
-            return False
-        try:
-            payload = {"situation": situation, "law_name": law_name}
-            if isinstance(summary, dict):
-                payload["summary"] = summary
-            sb.table("law_reports").update(payload).eq("id", report_id).execute()
-            return True
-        except Exception:
-            return False
-
-    @staticmethod
-    def restore_res_from_row(row: dict) -> dict:
-        """
-        DB row -> workflow_result 형태로 복원
-        """
-        summary = row.get("summary") or {}
-        meta = summary.get("meta") or {}
-        res = {
-            "situation": row.get("situation") or "",
-            "meta": meta,
-            "strategy": summary.get("strategy") or "",
-            "search": summary.get("search_initial") or "",
-            "law": summary.get("law_initial") or row.get("law_name") or "",
-            "doc": summary.get("document_content") or None,
-            "lawbot_pack": summary.get("lawbot_pack") or {},
-        }
-        # save msg
-        res["save_msg"] = "DB에서 복원됨"
-        return res
-
-    @staticmethod
-    def restore_followup_from_row(row: dict):
-        summary = row.get("summary") or {}
-        followup = summary.get("followup") or {}
-        st.session_state["report_id"] = row.get("id")
-        st.session_state["followup_count"] = int(followup.get("count") or 0)
-        st.session_state["followup_messages"] = followup.get("messages") or []
-        st.session_state["followup_extra_context"] = followup.get("extra_context") or ""
-
-# ==========================
-# Agent Logic
-# ==========================
+# ==========================================
+# 4) Global Instances
+# ==========================================
 llm_service = LLMService()
 search_service = SearchService()
 law_api_service = LawOfficialService()
-db_service = DatabaseService()
 
+
+# ==========================================
+# 5) Agents
+# ==========================================
 class LegalAgents:
     @staticmethod
     def researcher(situation: str) -> str:
@@ -542,8 +600,8 @@ class LegalAgents:
 형식: [{{"law_name": "도로교통법", "article_num": 32}}, ...]
 * 법령명은 정식 명칭 사용. 조문 번호 불명확하면 null.
 """
-        search_targets: List[Dict[str, Any]] = []
         extracted = llm_service.generate_json(prompt_extract)
+        search_targets: List[Dict[str, Any]] = []
 
         if isinstance(extracted, list):
             search_targets = extracted
@@ -598,6 +656,7 @@ Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
 반드시 상단에 [AI 추론 결과]임을 명시하고 환각 가능성을 경고하시오.
 """
             ai_fallback_text = (llm_service.generate_text(prompt_fallback) or "").strip()
+
             return f"""⚠️ **[시스템 경고: API 조회 실패]**
 (국가법령정보센터 연결 실패로 AI 지식 기반 답변입니다. **환각 가능성** 있으니 법제처 확인 필수)
 
@@ -654,70 +713,46 @@ Task: 아래 상황에 적용될 법령과 조항을 찾아 설명하시오.
         }
 
     @staticmethod
-    def _normalize_doc(doc_data: Any) -> Optional[dict]:
-        if isinstance(doc_data, dict):
-            # body_paragraphs가 문자열이면 리스트화
-            bp = doc_data.get("body_paragraphs", [])
-            if isinstance(bp, str):
-                doc_data["body_paragraphs"] = [bp]
-            if "title" not in doc_data:
-                doc_data["title"] = "공 문 서"
-            if "receiver" not in doc_data:
-                doc_data["receiver"] = "수신자 참조"
-            if "department_head" not in doc_data:
-                doc_data["department_head"] = "행정기관장"
-            if not isinstance(doc_data.get("body_paragraphs"), list):
-                doc_data["body_paragraphs"] = [str(doc_data.get("body_paragraphs", ""))]
-            return doc_data
-        return None
-
-    @staticmethod
     def drafter(situation: str, legal_basis: str, meta_info: dict, strategy: str) -> Optional[dict]:
-        # ✅ 공문서 JSON이 깨질 때가 많아서 "2단계 방어"로 안정화
         prompt = f"""
 당신은 행정기관의 베테랑 서기입니다. 아래 정보를 바탕으로 완결된 공문서를 작성하세요.
 
 [입력]
 - 민원: {situation}
 - 법적 근거: {legal_basis}
-- 시행일자: {meta_info.get('today_str','')}
-- 기한: {meta_info.get('deadline_str','')} ({meta_info.get('days_added','')}일)
+- 시행일자: {meta_info['today_str']}
+- 기한: {meta_info['deadline_str']} ({meta_info['days_added']}일)
 
 [전략]
 {strategy}
 
-[출력 형식(JSON만)]
+[출력은 JSON만]
 {{
   "title": "문서 제목",
-  "receiver": "수신자",
+  "receiver": "수신자(예: OOO 시장)",
   "body_paragraphs": ["문단1", "문단2", "..."],
-  "department_head": "부서장/기관장"
+  "department_head": "발신(예: 교통행정과장 OOO)"
 }}
 
 [원칙]
 1) 본문에 법 조항 인용 필수
-2) 구조: 경위 -> 법적 근거 -> 처분 내용 -> 이의제기 절차
+2) 구조: 경위 -> 법적 근거 -> 처분/조치 내용 -> 이의제기 절차
 3) 개인정보 마스킹('OOO')
+4) receiver에는 '수신:' 같은 접두어 쓰지 말고 수신자만 작성
 """
-        doc_data = llm_service.generate_json(prompt)
-        doc_norm = LegalAgents._normalize_doc(doc_data)
-        if doc_norm:
-            return doc_norm
+        data = llm_service.generate_json(prompt)
+        return data if isinstance(data, dict) else None
 
-        # 2차: 텍스트로라도 받기 → JSON 블록만 추출
-        text = llm_service.generate_text(prompt + "\n\nJSON만 출력!!!")
-        doc_data2 = _safe_json_loads(text)
-        return LegalAgents._normalize_doc(doc_data2)
 
-# ==========================
-# Workflow
-# ==========================
+# ==========================================
+# 6) Workflow + Lawbot pack
+# ==========================================
 def build_lawbot_pack(res: dict) -> dict:
     situation = (res.get("situation") or "").strip()
     prompt = f"""
 상황: "{situation}"
-국가법령정보센터 법령 AI(Lawbot) 검색에 넣을 핵심 키워드 3~6개를 JSON 배열로만 출력.
-예: ["무단방치", "자동차관리법", "공시송달", "직권말소"]
+국가법령정보센터 법령 AI(Lawbot/검색)에 넣을 핵심 키워드 3~6개를 JSON 배열로만 출력.
+예: ["무단방치", "자동차관리법", "공시송달", "직권말소", "시행규칙", "서식"]
 """
     kws = llm_service.generate_json(prompt) or []
     if not isinstance(kws, list):
@@ -733,6 +768,7 @@ def build_lawbot_pack(res: dict) -> dict:
         "url": make_lawbot_url(query_text[:180]),
     }
 
+
 def run_workflow(user_input: str) -> dict:
     log_placeholder = st.empty()
     logs: List[str] = []
@@ -742,31 +778,35 @@ def run_workflow(user_input: str) -> dict:
         log_placeholder.markdown("".join(logs), unsafe_allow_html=True)
         time.sleep(0.12)
 
-    add_log("🔍 Phase 1: 법령 리서치 중...", "legal")
+    add_log("🔍 Phase 1: 법령 및 유사 사례 리서치 중...", "legal")
     legal_basis = LegalAgents.researcher(user_input)
-    add_log("📜 법적 근거 확보", "legal")
+    add_log("📜 법적 근거 확인 완료", "legal")
 
-    add_log("🟩 Phase 1-2: 뉴스/사례 조회...", "search")
+    add_log("🟩 네이버 검색 엔진 가동...", "search")
     try:
-        search_results = search_service.search_precedents(user_input, llm_service)
+        search_results = search_service.search_precedents(user_input)
     except Exception:
         search_results = "검색 모듈 미연결 (건너뜀)"
 
-    add_log("🧠 Phase 2: 업무 처리 방향 수립...", "strat")
+    add_log("🧠 Phase 2: AI 주무관이 업무 처리 방향 수립...", "strat")
     strategy = LegalAgents.strategist(user_input, legal_basis, search_results)
 
-    add_log("📅 Phase 3: 기한 산정...", "calc")
+    add_log("📅 Phase 3: 기한 산정 및 공문서 작성...", "calc")
     meta_info = LegalAgents.clerk(user_input, legal_basis)
 
-    add_log("✍️ Phase 4: 공문서 조판 중...", "draft")
+    add_log("✍️ Phase 4: 공문서 조판...", "draft")
     doc_data = LegalAgents.drafter(user_input, legal_basis, meta_info, strategy)
 
     time.sleep(0.2)
     log_placeholder.empty()
 
+    # ✅ 공문 조판 안정화(절대 깨지지 않음)
+    fixed_doc = normalize_doc(doc_data, meta_info, user_input, legal_basis, strategy)
+
     res = {
+        "title": (user_input[:60] if user_input else "케이스"),
         "situation": user_input,
-        "doc": doc_data,
+        "doc": fixed_doc,
         "meta": meta_info,
         "law": legal_basis,
         "search": search_results,
@@ -775,9 +815,10 @@ def run_workflow(user_input: str) -> dict:
     res["lawbot_pack"] = build_lawbot_pack(res)
     return res
 
-# ==========================
-# Follow-up Chat (expander 중첩 금지)
-# ==========================
+
+# ==========================================
+# 7) Follow-up Chat (NO nested expanders)
+# ==========================================
 def build_case_context(res: dict) -> str:
     situation = res.get("situation", "")
     law_txt = _strip_html(res.get("law", ""))
@@ -818,11 +859,13 @@ def build_case_context(res: dict) -> str:
 """
     return ctx.strip()
 
+
 def needs_tool_call(user_msg: str) -> dict:
     t = (user_msg or "").lower()
-    law_triggers = ["근거", "조문", "법령", "몇 조", "원문", "현행", "추가 조항", "다른 조문", "전문", "절차법", "행정절차", "규칙", "서식"]
+    law_triggers = ["근거", "조문", "법령", "몇 조", "원문", "현행", "추가 조항", "다른 조문", "전문", "절차법", "행정절차", "규칙", "서식", "시행규칙"]
     news_triggers = ["뉴스", "사례", "판례", "기사", "보도", "최근", "유사", "선례"]
     return {"need_law": any(k in t for k in law_triggers), "need_news": any(k in t for k in news_triggers)}
+
 
 def plan_tool_calls_llm(user_msg: str, situation: str, known_law_text: str) -> dict:
     prompt = f"""
@@ -837,7 +880,7 @@ def plan_tool_calls_llm(user_msg: str, situation: str, known_law_text: str) -> d
 [사용자 질문]
 {user_msg}
 
-[출력 JSON 스키마]
+[출력 JSON]
 {{
   "need_law": true/false,
   "law_name": "정식 법령명(필요시)",
@@ -862,6 +905,7 @@ def plan_tool_calls_llm(user_msg: str, situation: str, known_law_text: str) -> d
     plan["news_query"] = str(plan.get("news_query") or "").strip()
     plan["reason"] = str(plan.get("reason") or "").strip()
     return plan
+
 
 def answer_followup(case_context: str, extra_context: str, chat_history: list, user_msg: str) -> str:
     hist = chat_history[-8:]
@@ -888,41 +932,51 @@ def answer_followup(case_context: str, extra_context: str, chat_history: list, u
 """
     return llm_service.generate_text(prompt)
 
+
 def render_followup_chat(res: dict):
     # 세션 초기화
-    if "case_id" not in st.session_state:
-        st.session_state["case_id"] = None
-    if "followup_count" not in st.session_state:
-        st.session_state["followup_count"] = 0
-    if "followup_messages" not in st.session_state:
-        st.session_state["followup_messages"] = []
-    if "followup_extra_context" not in st.session_state:
-        st.session_state["followup_extra_context"] = ""
-    if "report_id" not in st.session_state:
-        st.session_state["report_id"] = None
+    st.session_state.setdefault("case_id", None)
+    st.session_state.setdefault("followup_count", 0)
+    st.session_state.setdefault("followup_messages", [])
+    st.session_state.setdefault("followup_extra_context", "")
+    st.session_state.setdefault("archive_case_id", None)
 
     current_case_id = (res.get("meta") or {}).get("doc_num", "") or "case"
     if st.session_state["case_id"] != current_case_id:
         st.session_state["case_id"] = current_case_id
-        # (복원된 케이스는 별도 로직에서 세팅되므로 여기서 강제 초기화하지 않음)
-        if not st.session_state.get("restored_case_lock"):
-            st.session_state["followup_count"] = 0
-            st.session_state["followup_messages"] = []
-            st.session_state["followup_extra_context"] = ""
-        st.session_state["restored_case_lock"] = False
+        st.session_state["followup_count"] = 0
+        st.session_state["followup_messages"] = []
+        st.session_state["followup_extra_context"] = ""
 
     remain = max(0, MAX_FOLLOWUP_Q - st.session_state["followup_count"])
     st.info(f"후속 질문 가능 횟수: **{remain}/{MAX_FOLLOWUP_Q}**")
 
-    # ✅ Lawbot 실행 버튼
+    # ✅ Lawbot 실행 버튼 (이름 변경)
     pack = res.get("lawbot_pack", {}) or {}
     qb = (pack.get("query_text") or "").strip()
     if qb:
-        st.caption("추가 근거/규칙/서식을 더 파고들 때:")
-        st.link_button("⚖️ 법령 AI Lawbot 실행 (법령·규칙·서식 찾기)", make_lawbot_url(qb), use_container_width=True)
+        st.caption("법령/규칙/서식까지 더 파고들기:")
+        st.link_button("🔎 법령 AI · Lawbot 실행 (법령/규칙/서식 찾기)", make_lawbot_url(qb), use_container_width=True)
+
+    # ✅ Lawbot 결과 붙여넣기(중첩 expander 금지 → toggle + container)
+    paste_mode = st.toggle("📎 Lawbot 결과 가져오기(복붙) — 법령/규칙/서식 발췌를 케이스에 반영", value=False)
+    if paste_mode:
+        lawbot_paste = st.text_area(
+            "Lawbot에서 찾은 근거/서식 텍스트를 붙여넣기",
+            height=140,
+            placeholder="예) 시행규칙 별지서식, 지침 문구, 규정 조항 발췌 등",
+        )
+        if st.button("✅ 붙여넣은 근거를 케이스에 반영", use_container_width=True):
+            if lawbot_paste.strip():
+                extra_ctx = st.session_state.get("followup_extra_context", "")
+                extra_ctx += "\n\n[Lawbot 수집 근거(사용자 복붙)]\n" + lawbot_paste.strip()
+                st.session_state["followup_extra_context"] = extra_ctx
+                st.success("반영 완료")
+            else:
+                st.warning("붙여넣기 내용이 비었습니다.")
 
     if remain == 0:
-        st.warning("후속 질문 한도(5회)를 모두 사용했습니다.")
+        st.warning("후속 질문 한도(5회)를 모두 사용했습니다. (추가 질문 불가)")
         return
 
     # 기존 대화 렌더
@@ -941,6 +995,7 @@ def render_followup_chat(res: dict):
         st.markdown(user_q)
 
     case_context = build_case_context(res)
+
     extra_ctx = st.session_state.get("followup_extra_context", "")
     tool_need = needs_tool_call(user_q)
 
@@ -951,7 +1006,6 @@ def render_followup_chat(res: dict):
             art = plan.get("article_num", 0)
             art = art if art > 0 else None
             law_text, law_link = law_api_service.get_law_text(plan["law_name"], art, return_link=True)
-
             extra_ctx += f"\n\n[추가 법령 조회]\n- 요청: {plan['law_name']} / 제{art if art else '?'}조\n{_strip_html(law_text)}"
             if law_link:
                 extra_ctx += f"\n(현행 원문 링크: {law_link})"
@@ -959,12 +1013,6 @@ def render_followup_chat(res: dict):
         if plan.get("need_news") and plan.get("news_query"):
             news_txt = search_service.search_news(plan["news_query"])
             extra_ctx += f"\n\n[추가 뉴스 조회]\n- 검색어: {plan['news_query']}\n{_strip_html(news_txt)}"
-
-        # Lawbot 빠른 링크
-        if plan.get("need_law"):
-            q2 = (f"{plan.get('law_name','')} 제{plan.get('article_num',0)}조 {user_q}".strip()).replace("제0조", "")
-            q2 = re.sub(r"\s+", " ", q2).strip()[:180]
-            extra_ctx += f"\n\n[법령 AI(Lawbot) 빠른검색]\n- 키워드: {q2}\n- 링크: {make_lawbot_url(q2)}"
 
         st.session_state["followup_extra_context"] = extra_ctx
 
@@ -980,195 +1028,215 @@ def render_followup_chat(res: dict):
 
     st.session_state["followup_messages"].append({"role": "assistant", "content": ans})
 
-    # ✅ DB에 후속까지 저장
-    followup_payload = {
+    # ✅ 후속까지 payload에 반영 후 DB 업데이트(로그인 + 저장된 케이스 id가 있을 때)
+    res["followup_payload"] = {
         "count": st.session_state["followup_count"],
         "messages": st.session_state["followup_messages"],
         "extra_context": st.session_state.get("followup_extra_context", ""),
     }
-    upd = db_service.update_followup(
-        report_id=st.session_state.get("report_id"),
-        res=res,
-        followup=followup_payload,
-    )
-    if not upd.get("ok"):
-        st.caption(f"DB 후속 저장 실패: {upd.get('msg')}")
 
-# ==========================
-# Sidebar: Login / Signup / History / Admin
-# ==========================
-def sidebar_auth_and_history():
-    st.sidebar.title("🔐 로그인 / 히스토리")
+    case_id = st.session_state.get("archive_case_id")
+    if st.session_state.get("logged_in") and case_id:
+        ok, msg = archive.update_case(case_id, res)
+        if not ok:
+            st.caption(msg)
 
-    # session init
-    if "logged_in" not in st.session_state:
-        st.session_state["logged_in"] = False
-    if "user_email" not in st.session_state:
-        st.session_state["user_email"] = ""
-    if "sb_access_token" not in st.session_state:
-        st.session_state["sb_access_token"] = ""
-    if "sb_refresh_token" not in st.session_state:
-        st.session_state["sb_refresh_token"] = ""
 
-    sb = get_supabase_base()
-    if not sb:
-        st.sidebar.error("Supabase 설정이 없습니다. secrets.toml 확인")
+# ==========================================
+# 8) Sidebar: 로그인/회원가입/히스토리
+# ==========================================
+def sidebar_auth_history():
+    st.sidebar.title("🔐 로그인 / 회원가입 / 히스토리")
+
+    if not supabase:
+        st.sidebar.error("Supabase 설정이 없습니다. (secrets.toml 확인)")
         return
 
-    if not st.session_state["logged_in"]:
-        choice = st.sidebar.radio("메뉴", ["로그인", "회원가입"], horizontal=False)
+    logged_in = bool(st.session_state.get("logged_in"))
+    user_email = (st.session_state.get("user_email") or "").strip()
 
-        email = st.sidebar.text_input("아이디(이메일)", key="auth_email")
-        password = st.sidebar.text_input("비밀번호", type="password", key="auth_pw")
+    menu = st.sidebar.radio("메뉴", ["로그인", "회원가입", "히스토리"], index=0)
 
-        if choice == "회원가입":
-            st.sidebar.caption("✅ @korea.kr 이메일만 가입 허용")
-            if st.sidebar.button("가입하기", use_container_width=True):
-                if not _is_korea_email(email):
-                    st.sidebar.error("❌ @korea.kr 메일로만 가입 가능합니다.")
-                elif not password or len(password) < 6:
-                    st.sidebar.error("❌ 비밀번호는 6자 이상")
+    # ---------- 회원가입(OTP→비번) ----------
+    if menu == "회원가입":
+        st.sidebar.subheader("🧾 회원가입 (@korea.kr만)")
+
+        if st.session_state["signup_step"] == 0:
+            email = st.sidebar.text_input("메일 주소", value=st.session_state.get("pending_email", ""))
+            if st.sidebar.button("인증번호 발송", use_container_width=True):
+                if not email.endswith("@korea.kr"):
+                    st.sidebar.error("❌ @korea.kr 메일만 가입 허용")
                 else:
                     try:
-                        sb.auth.sign_up({"email": email, "password": password})
-                        st.sidebar.success("✉️ 메일함에서 인증 후 로그인하세요.")
-                    except Exception as e:
-                        st.sidebar.error(f"가입 실패: {e}")
-
-        else:
-            if st.sidebar.button("로그인", use_container_width=True):
-                if not _is_korea_email(email):
-                    st.sidebar.error("❌ @korea.kr 메일만 로그인 허용")
-                else:
-                    try:
-                        res = sb.auth.sign_in_with_password({"email": email, "password": password})
-                        # session tokens
-                        access_token = ""
-                        refresh_token = ""
-                        try:
-                            access_token = res.session.access_token
-                            refresh_token = res.session.refresh_token
-                        except Exception:
-                            # dict-like fallback
-                            access_token = (res.get("session") or {}).get("access_token", "")
-                            refresh_token = (res.get("session") or {}).get("refresh_token", "")
-
-                        st.session_state["logged_in"] = True
-                        st.session_state["user_email"] = email
-                        st.session_state["sb_access_token"] = access_token
-                        st.session_state["sb_refresh_token"] = refresh_token
+                        supabase.auth.sign_in_with_otp({
+                            "email": email,
+                            "options": {"should_create_user": True}
+                        })
+                        st.session_state["pending_email"] = email
+                        st.session_state["signup_step"] = 1
+                        st.sidebar.success("✅ 인증번호를 메일로 보냈습니다. 코드를 입력하세요.")
                         st.rerun()
-                    except Exception:
-                        st.sidebar.error("아이디/비밀번호를 확인해주세요.")
-        return
+                    except Exception as e:
+                        st.sidebar.error(f"발송 실패: {e}")
 
-    # logged in
-    user_email = st.session_state["user_email"]
-    admin_badge = "👑 관리자" if is_admin_user() else "👤 사용자"
-    st.sidebar.success(f"✅ 접속중: {user_email}\n\n{admin_badge}")
+        elif st.session_state["signup_step"] == 1:
+            email = st.session_state.get("pending_email", "")
+            st.sidebar.write(f"대상: **{email}**")
+            otp = st.sidebar.text_input("인증번호(OTP)", placeholder="메일로 받은 숫자코드")
+            c1, c2 = st.sidebar.columns(2)
+            with c1:
+                if st.button("확인", use_container_width=True):
+                    try:
+                        res = supabase.auth.verify_otp({
+                            "email": email,
+                            "token": otp,
+                            "type": "email"
+                        })
+                        ok = set_session_from_auth(res)
+                        if ok:
+                            st.session_state["user_email"] = email
+                            st.session_state["signup_step"] = 2
+                            st.sidebar.success("✅ 인증 완료! 비밀번호를 설정하세요.")
+                            st.rerun()
+                        else:
+                            st.sidebar.error("세션 생성 실패(OTP 확인은 됐으나 session이 없음).")
+                    except Exception as e:
+                        st.sidebar.error(f"인증 실패: {e}")
+            with c2:
+                if st.button("처음부터", use_container_width=True):
+                    st.session_state["signup_step"] = 0
+                    st.session_state["pending_email"] = ""
+                    st.rerun()
 
-    col_a, col_b = st.sidebar.columns(2)
-    if col_a.button("로그아웃", use_container_width=True):
-        st.session_state["logged_in"] = False
-        st.session_state["user_email"] = ""
-        st.session_state["sb_access_token"] = ""
-        st.session_state["sb_refresh_token"] = ""
-        st.session_state.pop("workflow_result", None)
-        st.session_state.pop("report_id", None)
-        st.rerun()
+        elif st.session_state["signup_step"] == 2:
+            email = st.session_state.get("pending_email") or st.session_state.get("user_email")
+            st.sidebar.write(f"대상: **{email}**")
+            pw1 = st.sidebar.text_input("비밀번호", type="password")
+            pw2 = st.sidebar.text_input("비밀번호 확인", type="password")
+            if st.sidebar.button("비밀번호 설정 완료", use_container_width=True):
+                if not pw1 or pw1 != pw2:
+                    st.sidebar.error("비밀번호가 비었거나 서로 다릅니다.")
+                else:
+                    try:
+                        supabase.auth.update_user({"password": pw1})
+                        st.sidebar.success("✅ 비밀번호 설정 완료! 이제 로그인 메뉴에서 메일+비번으로 로그인하세요.")
+                        st.session_state["signup_step"] = 0
+                        st.session_state["pending_email"] = ""
+                    except Exception as e:
+                        st.sidebar.error(f"설정 실패: {e}")
 
-    if col_b.button("새로고침", use_container_width=True):
-        st.rerun()
+    # ---------- 로그인 ----------
+    if menu == "로그인":
+        st.sidebar.subheader("🔑 로그인 (메일 + 비밀번호)")
 
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🗂️ 히스토리 (짠 복원)")
-
-    rows = db_service.list_reports(limit=60)
-    if not rows:
-        st.sidebar.caption("저장된 기록이 없습니다.")
-        return
-
-    # 관리자 편집 패널
-    st.sidebar.caption("기록 클릭 → 오른쪽 화면이 그대로 복원됩니다.")
-
-    for row in rows[:60]:
-        rid = row.get("id")
-        created = (row.get("created_at") or "")[:19].replace("T", " ")
-        title = (row.get("situation") or "")[:16].replace("\n", " ")
-        who = (row.get("user_email") or "").split("@")[0] if row.get("user_email") else ""
-
-        label = f"{created} | {title}"
-        if is_admin_user():
-            label += f" | {who}"
-
-        with st.sidebar.container():
-            c1, c2 = st.sidebar.columns([3, 1])
-            if c1.button(f"📌 {label}", key=f"restore_{rid}", use_container_width=True):
-                res = DatabaseService.restore_res_from_row(row)
-                st.session_state["workflow_result"] = res
-                DatabaseService.restore_followup_from_row(row)
-                st.session_state["restored_case_lock"] = True
+        if logged_in:
+            st.sidebar.success(f"접속 중: {user_email}")
+            if is_admin_email(user_email):
+                st.sidebar.warning("👑 관리자 권한: 전체 기록 CRUD 가능")
+            if st.sidebar.button("로그아웃", use_container_width=True):
+                logout()
                 st.rerun()
-
-            # 관리자 삭제
-            if is_admin_user():
-                if c2.button("🗑️", key=f"del_{rid}", use_container_width=True):
-                    ok = db_service.delete_report(rid)
+        else:
+            email = st.sidebar.text_input("아이디(이메일)")
+            password = st.sidebar.text_input("비밀번호", type="password")
+            if st.sidebar.button("로그인", use_container_width=True):
+                try:
+                    res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    ok = set_session_from_auth(res)
                     if ok:
-                        st.sidebar.success("삭제 완료")
+                        st.session_state["user_email"] = email
+                        st.sidebar.success("✅ 로그인 성공")
                         st.rerun()
                     else:
-                        st.sidebar.error("삭제 실패")
+                        st.sidebar.error("로그인 세션 설정 실패")
+                except Exception as e:
+                    st.sidebar.error(f"로그인 실패: {e}")
 
-    # 관리자: 수정 패널(선택적으로)
-    if is_admin_user():
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("🛠️ 관리자 수정(선택)")
-        st.sidebar.caption("복원 후 수정하세요. (situation/law_name/summary 일부 수정 가능)")
-        if st.session_state.get("report_id") and st.session_state.get("workflow_result"):
-            rid = st.session_state["report_id"]
-            res = st.session_state["workflow_result"]
-            sit = st.sidebar.text_area("situation", value=res.get("situation",""), height=90, key="adm_edit_sit")
-            lw = st.sidebar.text_input("law_name(표시용)", value=res.get("law",""), key="adm_edit_law")
+    # ---------- 히스토리 ----------
+    if menu == "히스토리":
+        st.sidebar.subheader("📚 히스토리 (짠-복원)")
 
-            edit_json = st.sidebar.checkbox("summary JSON까지 수정", value=False)
-            summary_obj = None
-            if edit_json:
-                # 현재 workflow_result로부터 summary를 재구성
-                current_summary = {
-                    "meta": res.get("meta"),
-                    "strategy": res.get("strategy"),
-                    "search_initial": res.get("search"),
-                    "law_initial": res.get("law"),
-                    "document_content": res.get("doc"),
-                    "lawbot_pack": res.get("lawbot_pack", {}),
-                    "followup": {
-                        "count": st.session_state.get("followup_count",0),
-                        "messages": st.session_state.get("followup_messages",[]),
-                        "extra_context": st.session_state.get("followup_extra_context",""),
-                    }
-                }
-                txt = st.sidebar.text_area("summary(JSON)", value=json.dumps(current_summary, ensure_ascii=False), height=180, key="adm_edit_summary")
-                try:
-                    summary_obj = json.loads(txt)
-                except Exception:
-                    st.sidebar.error("summary JSON 파싱 실패")
-                    summary_obj = None
+        if not logged_in:
+            st.sidebar.info("로그인 후 이용 가능합니다.")
+            return
 
-            if st.sidebar.button("✅ 수정 저장", use_container_width=True):
-                ok = db_service.update_report_basic(rid, sit, lw, summary_obj if edit_json else None)
-                if ok:
-                    st.sidebar.success("수정 저장 완료")
-                    # 화면에도 반영
-                    st.session_state["workflow_result"]["situation"] = sit
-                    st.session_state["workflow_result"]["law"] = lw
+        if is_admin_email(user_email):
+            st.sidebar.warning("👑 관리자: 전체 기록이 보입니다.")
+        else:
+            st.sidebar.caption("본인 기록만 보입니다(RLS).")
+
+        items = archive.list_cases(limit=120)
+        if not items:
+            st.sidebar.info("저장된 기록이 없습니다.")
+            return
+
+        labels = []
+        id_map = {}
+        for it in items:
+            created = it.get("created_at", "")
+            title = it.get("title") or (it.get("situation", "")[:40] if it.get("situation") else "기록")
+            owner = it.get("user_email", "")
+            label = f"{created} | {title}"
+            if is_admin_email(user_email):
+                label += f" | {owner}"
+            labels.append(label)
+            id_map[label] = it.get("id")
+
+        pick = st.sidebar.selectbox("불러올 기록", labels)
+        case_id = id_map.get(pick)
+
+        c1, c2 = st.sidebar.columns(2)
+        with c1:
+            if st.button("불러오기", use_container_width=True):
+                row = archive.get_case(case_id) if case_id else None
+                if row and row.get("payload"):
+                    st.session_state["workflow_result"] = row["payload"]
+                    st.session_state["archive_case_id"] = row.get("id")
+                    st.sidebar.success("✅ 복원 완료(메인 화면에 표시)")
                     st.rerun()
                 else:
-                    st.sidebar.error("수정 실패")
+                    st.sidebar.error("불러오기 실패")
 
-# ==========================
-# Main UI
-# ==========================
+        with c2:
+            if st.button("삭제", use_container_width=True):
+                if case_id:
+                    ok, msg = archive.delete_case(case_id)
+                    if ok:
+                        st.sidebar.success(msg)
+                        # 현재 복원된 케이스가 삭제됐으면 리셋
+                        if st.session_state.get("archive_case_id") == case_id:
+                            st.session_state.pop("workflow_result", None)
+                            st.session_state["archive_case_id"] = None
+                        st.rerun()
+                    else:
+                        st.sidebar.error(msg)
+
+        # 관리자 편집(간단)
+        if is_admin_email(user_email):
+            st.sidebar.markdown("---")
+            st.sidebar.caption("관리자 수정(제목/상황만)")
+            row = archive.get_case(case_id) if case_id else None
+            if row and row.get("payload"):
+                payload = row["payload"]
+                new_title = st.sidebar.text_input("제목", value=payload.get("title", ""))
+                new_sit = st.sidebar.text_area("상황", value=payload.get("situation", ""), height=90)
+                if st.sidebar.button("수정 저장", use_container_width=True):
+                    payload["title"] = new_title
+                    payload["situation"] = new_sit
+                    ok, msg = archive.update_case(case_id, payload)
+                    if ok:
+                        st.sidebar.success(msg)
+                        st.rerun()
+                    else:
+                        st.sidebar.error(msg)
+
+
+sidebar_auth_history()
+
+
+# ==========================================
+# 9) Main UI
+# ==========================================
 def render_law_box(raw_law: str):
     cleaned = (raw_law or "").replace("&lt;", "<").replace("&gt;", ">")
     cleaned = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", cleaned)
@@ -1198,6 +1266,7 @@ def render_law_box(raw_law: str):
         unsafe_allow_html=True
     )
 
+
 def render_news_box(raw_news: str):
     news_body = (raw_news or "").replace("# ", "").replace("## ", "")
     news_body = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", news_body)
@@ -1205,8 +1274,8 @@ def render_news_box(raw_news: str):
         r"\[([^\]]+)\]\(([^)]+)\)",
         r'<a href="\2" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600;">\1</a>',
         news_body
-    ).replace("\n", "<br>")
-
+    )
+    news_html = news_html.replace("\n", "<br>")
     st.markdown(
         f"""
         <div style="
@@ -1227,80 +1296,32 @@ def render_news_box(raw_news: str):
         unsafe_allow_html=True
     )
 
-def render_document(res: dict):
-    doc = res.get("doc") or {}
-    meta = res.get("meta") or {}
-
-    # 공문 JSON이 비어있으면 안내 + raw로라도 보여주기
-    if not isinstance(doc, dict) or not doc:
-        st.warning("공문 생성 결과(doc)가 비어 있습니다. (모델 JSON 출력 실패 가능)")
-        raw = doc if isinstance(doc, str) else json.dumps(doc, ensure_ascii=False)
-        st.code(raw or "(없음)", language="json")
-        return
-
-    title = _escape(str(doc.get("title", "공 문 서")))
-    receiver = _escape(str(doc.get("receiver", "수신자 참조")))
-    dept = _escape(str(doc.get("department_head", "행정기관장")))
-    doc_num = _escape(str(meta.get("doc_num", "")))
-    today_str = _escape(str(meta.get("today_str", "")))
-
-    paragraphs = doc.get("body_paragraphs", [])
-    if isinstance(paragraphs, str):
-        paragraphs = [paragraphs]
-    if not isinstance(paragraphs, list):
-        paragraphs = [str(paragraphs)]
-
-    html_content = f"""
-<div class="paper-sheet">
-  <div class="stamp">직인생략</div>
-  <div class="doc-header">{title}</div>
-  <div class="doc-info">
-    <span>문서번호: {doc_num}</span>
-    <span>시행일자: {today_str}</span>
-    <span>수신: {receiver}</span>
-  </div>
-  <hr style="border: 1px solid black; margin-bottom: 30px;">
-  <div class="doc-body">
-"""
-    for p in paragraphs:
-        html_content += f"<p style='margin-bottom: 15px;'>{_escape(str(p))}</p>"
-
-    html_content += f"""
-  </div>
-  <div class="doc-footer">{dept}</div>
-</div>
-"""
-    st.markdown(html_content, unsafe_allow_html=True)
 
 def main():
-    # ✅ sidebar login/history
-    sidebar_auth_and_history()
-
     col_left, col_right = st.columns([1, 1.2])
 
     with col_left:
         st.title("🏢 AI 행정관 Pro 충주시청")
-        st.caption("문의 kim0395kk@korea.kr \n세계최초 행정 Govable AI 에이젼트")
+        st.caption("문의 kim0395kk@korea.kr \n 세계최초 행정 Govable AI 에이젼트")
         st.markdown("---")
 
+        # 상태 표시
         ai_ok = "✅AI" if llm_service.is_available() else "❌AI"
         law_ok = "✅LAW" if bool(st.secrets.get("general", {}).get("LAW_API_ID")) else "❌LAW"
         nv_ok = "✅NEWS" if bool(st.secrets.get("general", {}).get("NAVER_CLIENT_ID")) else "❌NEWS"
-        db_ok = "✅DB" if db_service.is_active else "❌DB"
+        sb_ok = "✅SUPABASE" if supabase else "❌SUPABASE"
         login_ok = "✅LOGIN" if st.session_state.get("logged_in") else "❌LOGIN"
-        st.caption(f"상태: {ai_ok} | {law_ok} | {nv_ok} | {db_ok} | {login_ok}")
+        st.caption(f"상태: {ai_ok} | {law_ok} | {nv_ok} | {sb_ok} | {login_ok}")
 
         st.markdown("### 🗣️ 업무 지시")
         user_input = st.text_area(
             "업무 내용",
-            height=150,
-            placeholder="예시 \n- 상황: (무슨 일 / 어디 / 언제 / 증거 유무...).... \n- 의도: (확인하고 싶은 쟁점: 요건/절차/근거... )\n- 요청: (원하는 결과물: 공문 종류/회신/사전통지 등)",
+            height=160,
+            placeholder="예시\n- 상황: (무슨 일 / 어디 / 언제 / 증거 유무...)\n- 의도: (확인하고 싶은 쟁점: 요건/절차/근거...)\n- 요청: (원하는 결과물: 공문 종류/회신/사전통지 등)",
             label_visibility="collapsed",
         )
-        st.warning("⚠️ 비공개 문서 부분복사/내부검토 민감정보(성명·연락처·주소·차량번호 등) 입력 금지")
 
-        if not st.session_state.get("logged_in"):
-            st.info("저장/히스토리/복원 기능 사용하려면 사이드바에서 @korea.kr 로그인 필요")
+        st.warning("⚠️ 비공개 문서 부분복사/내부검토 민감정보(성명·연락처·주소·차량번호 등) 입력 금지")
 
         if st.button("⚡ 스마트 분석 시작", type="primary", use_container_width=True):
             if not user_input:
@@ -1310,62 +1331,99 @@ def main():
                     with st.spinner("AI 에이전트 팀이 협업 중입니다..."):
                         res = run_workflow(user_input)
 
-                        # ✅ 저장(로그인 시에만)
-                        ins = db_service.insert_initial_report(res)
-                        res["save_msg"] = ins.get("msg")
-                        st.session_state["report_id"] = ins.get("id")
+                        # ✅ 로그인 상태면 자동 저장
+                        if st.session_state.get("logged_in") and supabase:
+                            ok, msg, inserted_id = archive.insert_case(res)
+                            res["save_msg"] = msg
+                            st.session_state["archive_case_id"] = inserted_id
+                        else:
+                            res["save_msg"] = "로그인하지 않아 DB 저장을 건너뜀"
 
                         st.session_state["workflow_result"] = res
-
-                        # 새 케이스 생성이므로 followup 초기화
-                        st.session_state["restored_case_lock"] = False
-                        st.session_state["followup_count"] = 0
-                        st.session_state["followup_messages"] = []
-                        st.session_state["followup_extra_context"] = ""
-
+                        st.rerun()
                 except Exception as e:
                     st.error(f"시스템 오류 발생: {e}")
 
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
             st.markdown("---")
-            if "성공" in (res.get("save_msg") or ""):
-                st.success(f"✅ {res['save_msg']}")
-            else:
-                st.info(f"ℹ️ {res.get('save_msg','')}")
 
-            # ✅ 법령 AI(Lawbot) 실행 버튼(문구 변경)
+            save_msg = res.get("save_msg", "")
+            if "성공" in save_msg:
+                st.success(f"✅ {save_msg}")
+            else:
+                st.info(f"ℹ️ {save_msg}")
+
+            # ✅ Lawbot 버튼명 변경
             pack = res.get("lawbot_pack", {}) or {}
             qb = (pack.get("query_text") or "").strip()
             if qb:
-                st.link_button("⚖️ 법령 AI Lawbot 실행 (법령·규칙·서식 찾기)", make_lawbot_url(qb), use_container_width=True)
+                st.link_button("🔎 법령 AI · Lawbot 실행 (법령/규칙/서식 찾기)", make_lawbot_url(qb), use_container_width=True)
 
-            st.markdown("### ✅ [검토] 법령 및 유사 사례 확인")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**📜 적용 법령 (법령명 클릭 시 현행 원문 새창)**")
-                render_law_box(res.get("law", ""))
-            with col2:
-                st.markdown("**🟩 관련 뉴스/사례**")
-                render_news_box(res.get("search", ""))
+            with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
+                col1, col2 = st.columns(2)
 
-            st.markdown("### 🧭 [방향] 업무 처리 가이드라인")
-            st.markdown(res.get("strategy", ""))
+                with col1:
+                    st.markdown("**📜 적용 법령 (법령명 클릭 시 현행 원문 새창)**")
+                    render_law_box(res.get("law", ""))
+
+                with col2:
+                    st.markdown("**🟩 관련 뉴스/사례**")
+                    render_news_box(res.get("search", ""))
+
+            with st.expander("🧭 [방향] 업무 처리 가이드라인", expanded=True):
+                st.markdown(res.get("strategy", ""))
 
     with col_right:
         if "workflow_result" in st.session_state:
             res = st.session_state["workflow_result"]
-            render_document(res)
+            doc = res.get("doc")
+            meta = res.get("meta", {})
 
-            st.markdown("---")
-            st.subheader("💬 후속 질문 (케이스 고정 / 최대 5회)")
-            render_followup_chat(res)
+            if doc:
+                html_content = f"""
+<div class="paper-sheet">
+  <div class="stamp">직인생략</div>
+  <div class="doc-header">{_escape(_coerce_str(doc.get('title', '공 문 서')))}</div>
+  <div class="doc-info">
+    <span>문서번호: {_escape(_coerce_str(meta.get('doc_num','')))}</span>
+    <span>시행일자: {_escape(_coerce_str(meta.get('today_str','')))}</span>
+    <span>수신: {_escape(_coerce_str(doc.get('receiver', '수신자 참조')))}</span>
+  </div>
+  <hr style="border: 1px solid black; margin-bottom: 30px;">
+  <div class="doc-body">
+"""
+                paragraphs = doc.get("body_paragraphs", [])
+                if isinstance(paragraphs, str):
+                    paragraphs = [paragraphs]
+
+                for p in paragraphs:
+                    p = _coerce_str(p).strip()
+                    if p:
+                        html_content += f"<p style='margin-bottom: 15px;'>{_escape(p)}</p>"
+
+                html_content += f"""
+  </div>
+  <div class="doc-footer">{_escape(_coerce_str(doc.get('department_head', '행정기관장')))}</div>
+</div>
+"""
+                st.markdown(html_content, unsafe_allow_html=True)
+
+                st.markdown("---")
+                # ✅ expander는 여기 하나만! (내부에서 expander 만들지 않음)
+                with st.expander("💬 [후속 질문] 케이스 고정 챗봇 (최대 5회)", expanded=True):
+                    render_followup_chat(res)
+
+            else:
+                st.warning("공문 생성 결과(doc)가 비어 있습니다. (모델 출력 실패 가능)")
+
         else:
             st.markdown(
                 """<div style='text-align: center; padding: 100px; color: #aaa; background: white; border-radius: 10px; border: 2px dashed #ddd;'>
-<h3>📄 Document Preview</h3><p>왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.</p></div>""",
+<h3>📄 Document Preview</h3><p>업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.</p></div>""",
                 unsafe_allow_html=True,
             )
+
 
 if __name__ == "__main__":
     main()
