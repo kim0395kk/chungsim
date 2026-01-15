@@ -31,6 +31,11 @@ except Exception:
     Groq = None
 
 try:
+    import pandas as pd
+except Exception:
+    pd = None
+
+try:
     from supabase import create_client
 except Exception:
     create_client = None
@@ -55,6 +60,19 @@ def shorten_one_line(text: str, max_len: int = 28) -> str:
     if len(s) <= max_len:
         return s
     return s[: max_len - 1] + "…"
+
+def estimate_tokens(text: str) -> int:
+    """
+    정확한 토큰 카운트가 아니라 '운영 대시보드용 추정치'
+    - 한글/영문 혼합 기준 대략치로 충분
+    """
+    if not text:
+        return 0
+    # 보수적으로: 글자수 * 0.7
+    return int(len(text) * 0.7)
+
+def safe_now_utc_iso():
+    return datetime.utcnow().isoformat() + "Z"
 
 def _safe_json_loads(text: str) -> Optional[Any]:
     if not text:
@@ -97,6 +115,7 @@ def md_bold_to_html_safe(text: str) -> str:
     out.append(_escape(s[pos:]))
     html = "".join(out).replace("\n", "<br>")
     return html
+    
 
 def mask_sensitive(text: str) -> str:
     """개인정보/식별정보 간단 마스킹(입력 보호용)"""
@@ -110,6 +129,8 @@ def mask_sensitive(text: str) -> str:
     # car plate (rough)
     t = re.sub(r"\b\d{2,3}[가-힣]\d{4}\b", "***(차량번호)", t)
     return t
+
+
 
 # =========================================================
 # 2) STYLES
@@ -608,15 +629,19 @@ class LLMService:
             return "System Error"
 
     def generate_text(self, prompt: str) -> str:
-        try:
-            text, _ = self._try_gemini_text(prompt)
-            if text:
-                return text
-        except Exception:
-            pass
-        if self.groq_client:
-            return self._generate_groq(prompt)
-        return "시스템 오류: AI 모델 연결 실패"
+    try:
+        text, used = self._try_gemini_text(prompt)
+        if text:
+            st.session_state["last_model_used"] = used
+            return text
+    except Exception:
+        pass
+    if self.groq_client:
+        out = self._generate_groq(prompt)
+        st.session_state["last_model_used"] = "llama-3.3-70b-versatile(groq)"
+        return out
+    st.session_state["last_model_used"] = None
+    return "시스템 오류: AI 모델 연결 실패"
 
     def generate_json(self, prompt: str) -> Optional[Any]:
         strict = prompt + "\n\n반드시 JSON만 출력. 다른 텍스트 금지."
@@ -1108,7 +1133,11 @@ def build_lawbot_pack(situation: str, analysis: dict) -> dict:
     query_text = re.sub(r"\s+", " ", query_text)
     return {"core_keywords": kws[:10], "query_text": query_text[:180], "url": make_lawbot_url(query_text[:180])}
 
-def run_workflow(user_input: str) -> dict:
+def run_workflow(user_input: str, mode: str = "신속") -> dict:
+    # ⏱️ 시작 시간 측정
+    start_time = time.time()
+    search_count = 0  # 🔍 검색 횟수 초기화
+    
     log = st.empty()
     logs: List[str] = []
 
@@ -1124,10 +1153,12 @@ def run_workflow(user_input: str) -> dict:
     add("Phase 1) 법령 근거 강화(LLM + aiSearch + 링크/발췌)")
     law_pack = LegalAgents.researcher(user_input, analysis)
     law_md = law_pack.get("markdown", "")
+    search_count += 1  # ✅ 법령 API 조회 카운트
 
     # 2) precedents
     add("Phase 2) 뉴스/사례 조회")
     news = search_service.search_precedents(user_input)
+    search_count += 1  # ✅ 뉴스 API 조회 카운트
 
     # 3) strategy
     add("Phase 3) 처리방향/주의사항/체크리스트 생성")
@@ -1152,6 +1183,16 @@ def run_workflow(user_input: str) -> dict:
 
     log.empty()
 
+    # ⏱️ 종료 시간 및 소요 시간 계산
+    end_time = time.time()
+    execution_time = round(end_time - start_time, 2)
+
+    # 💰 결과 데이터를 기반으로 토큰 사용량 추정 (한글 1자당 약 0.7 토큰)
+    # 결과값 전체의 길이를 측정합니다.
+    full_res_text = str(analysis) + str(law_md) + str(news) + str(strategy) + str(doc)
+    estimated_tokens = int(len(full_res_text) * 0.7)
+    model_used = st.session_state.get("last_model_used")
+
     return {
         "situation": user_input,
         "analysis": analysis,
@@ -1165,6 +1206,12 @@ def run_workflow(user_input: str) -> dict:
         "doc": doc,
         "lawbot_pack": lb,
         "followups": [],
+        # --- 📊 대시보드용 데이터 추가 ---
+        "app_mode": mode,
+        "token_usage": estimated_tokens,
+        "execution_time": execution_time,
+        "search_count": search_count,
+        "model_used": model_used
     }
 
 # =========================================================
@@ -1176,6 +1223,7 @@ def db_insert_archive(sb, prompt: str, payload: dict) -> Optional[str]:
     user_id = user.get("id") if isinstance(user, dict) else None
     user_email = st.session_state.get("user_email") if st.session_state.get("logged_in") else None
 
+    # 1. 기본 저장 정보 생성
     row = {
         "prompt": prompt,
         "payload": payload,
@@ -1184,7 +1232,22 @@ def db_insert_archive(sb, prompt: str, payload: dict) -> Optional[str]:
         "user_email": user_email if st.session_state.get("logged_in") else None,
         "client_meta": {"app_ver": APP_VERSION},
     }
+
+    # 2. 대시보드용 통계 데이터(metrics) 추가 추출
+    # payload 안에 포함되어 온 통계 정보들을 꺼냅니다.
+    metrics = payload.get("metrics") or {}
+    
+    # 3. 데이터베이스 컬럼에 맞춰서 업데이트
+    row.update({
+        "app_mode": payload.get("app_mode", st.session_state.get("app_mode", "신속")),
+        "search_count": int(payload.get("search_count") or 0),
+        "execution_time": float(payload.get("execution_time") or 0.0),
+        "token_usage": int(payload.get("token_usage") or 0),
+        "model_used": payload.get("model_used"),
+    })
+
     try:
+        # 최종적으로 완성된 row를 DB에 넣습니다.
         resp = sb.table("work_archive").insert(row).execute()
         if hasattr(resp, "data") and resp.data and isinstance(resp.data, list):
             return resp.data[0].get("id")
@@ -1435,6 +1498,163 @@ def render_history_list(sb):
 # =========================================================
 # 8) UI
 # =========================================================
+def admin_fetch_work_archive(sb, limit: int = 2000) -> List[dict]:
+    try:
+        resp = (
+            sb.table("work_archive")
+            .select("id,created_at,user_email,anon_session_id,prompt,app_mode,search_count,execution_time,token_usage,model_used")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as e:
+        st.error(f"관리자 조회 실패(work_archive): {e}")
+        return []
+
+def admin_fetch_sessions(sb, minutes: int = 5) -> List[dict]:
+    # 동접 추정: last_seen이 최근 N분 이내
+    try:
+        # Supabase python client에서 gte 필터에 ISO string 가능
+        cutoff = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
+        resp = (
+            sb.table("app_sessions")
+            .select("session_id,first_seen,last_seen,user_email,user_id,meta")
+            .gte("last_seen", cutoff)
+            .order("last_seen", desc=True)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as e:
+        st.error(f"관리자 조회 실패(app_sessions): {e}")
+        return []
+
+def admin_fetch_events(sb, limit: int = 300) -> List[dict]:
+    try:
+        resp = (
+            sb.table("app_events")
+            .select("created_at,event_type,user_email,anon_session_id,archive_id,meta")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as e:
+        st.error(f"관리자 조회 실패(app_events): {e}")
+        return []
+
+def render_master_dashboard(sb):
+    st.markdown("## 🏛️ 관리자 운영 마스터 콘솔")
+
+    if not is_admin_user(st.session_state.get("user_email", "")):
+        st.warning("관리자만 접근 가능합니다.")
+        return
+
+    if not st.session_state.get("admin_mode", False):
+        st.info("사이드바에서 **관리자모드 켜기**를 활성화하세요.")
+        return
+
+    if is_admin_user(st.session_state.get("user_email","")) and st.session_state.get("admin_mode", False):
+    if st.button("❌ 기록 삭제", key=f"del_{row_id}"):
+        sb.table("work_archive").delete().eq("id", row_id).execute()
+        st.rerun()
+    
+
+    
+    if pd is None:
+        st.warning("pandas가 없어 차트/집계를 간소화합니다. requirements.txt에 `pandas`를 추가 권장.")
+    data = admin_fetch_work_archive(sb, limit=5000)
+    sessions = admin_fetch_sessions(sb, minutes=5)
+    events = admin_fetch_events(sb, limit=200)
+
+    # ---- 상단 KPI ----
+    total_runs = len(data)
+    online_now = len(sessions)
+
+    if pd and data:
+        df = pd.DataFrame(data)
+        # 전처리
+        df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
+        df["date"] = df["created_at"].dt.date
+        df["user_email"] = df["user_email"].fillna("(anon)")
+        df["app_mode"] = df["app_mode"].fillna("신속")
+        df["token_usage"] = pd.to_numeric(df["token_usage"], errors="coerce").fillna(0)
+        df["execution_time"] = pd.to_numeric(df["execution_time"], errors="coerce").fillna(0)
+        df["search_count"] = pd.to_numeric(df["search_count"], errors="coerce").fillna(0)
+
+        top_user = df["user_email"].value_counts().index[0] if not df.empty else "-"
+        total_tokens = int(df["token_usage"].sum())
+        avg_time = float(df["execution_time"].mean()) if not df.empty else 0.0
+        total_search = int(df["search_count"].sum())
+    else:
+        top_user = "-"
+        total_tokens = 0
+        avg_time = 0.0
+        total_search = 0
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("🟢 현재 접속(5분)", f"{online_now}")
+    c2.metric("📦 누적 실행", f"{total_runs:,}")
+    c3.metric("🧾 누적 토큰(추정)", f"{total_tokens:,}")
+    c4.metric("⏱️ 평균 소요시간", f"{avg_time:.2f}s")
+    c5.metric("🔎 총 검색(뉴스+법령)", f"{total_search:,}")
+
+    st.divider()
+
+    # ---- 차트 ----
+    if pd and data:
+        left, right = st.columns(2)
+
+        with left:
+            st.subheader("📈 일자별 토큰 사용량")
+            tok = df.groupby("date")["token_usage"].sum().sort_index()
+            st.line_chart(tok)
+
+        with right:
+            st.subheader("📊 모드(A/B/신속/정밀) 사용 비중")
+            mode_counts = df["app_mode"].value_counts()
+            st.bar_chart(mode_counts)
+
+        left2, right2 = st.columns(2)
+        with left2:
+            st.subheader("👤 사용자별 실행 Top 10")
+            user_counts = df["user_email"].value_counts().head(10)
+            st.bar_chart(user_counts)
+
+        with right2:
+            st.subheader("🤖 모델 사용 분포")
+            m = df["model_used"].fillna("(unknown)").value_counts().head(10)
+            st.bar_chart(m)
+
+        st.divider()
+
+        # ---- CSV 다운로드 ----
+        st.subheader("⬇️ 데이터 내보내기")
+        csv = df.sort_values("created_at", ascending=False).to_csv(index=False).encode("utf-8-sig")
+        st.download_button("work_archive CSV 다운로드", data=csv, file_name="work_archive.csv", mime="text/csv")
+
+    else:
+        st.info("표시할 데이터가 없습니다(또는 pandas 미설치).")
+
+    st.divider()
+
+    # ---- 실시간 접속자 ----
+    st.subheader("🟢 최근 5분 접속 세션")
+    if sessions:
+        st.write(f"최근 5분 내 last_seen 기준 세션: **{len(sessions)}**")
+        st.dataframe(sessions, use_container_width=True)
+    else:
+        st.caption("최근 5분 내 활성 세션이 없습니다.")
+
+    st.divider()
+
+    # ---- 이벤트 로그 ----
+    st.subheader("🧾 최근 이벤트 로그")
+    if events:
+        st.dataframe(events, use_container_width=True)
+    else:
+        st.caption("이벤트 로그가 없습니다.")
+
 def render_lawbot_button(url: str):
     st.markdown(
         f"""
@@ -1462,7 +1682,14 @@ def main():
         st.sidebar.error("Supabase 연결 정보(secrets)가 없습니다.")
         st.sidebar.caption("SUPABASE_URL / SUPABASE_ANON_KEY 필요")
 
-    st.markdown("""
+    st.markdown("""# 관리자면 탭 제공
+if sb and is_admin_user(st.session_state.get("user_email","")) and st.session_state.get("admin_mode", False):
+    tabs = st.tabs(["🧠 업무 처리", "🏛️ 마스터 대시보드"])
+    with tabs[1]:
+        render_master_dashboard(sb)
+    with tabs[0]:
+        pass  # 아래 기존 UI가 그대로 나오게
+
         <div style='text-align: center; padding: 2rem 0 3rem 0;'>
             <h1 style='font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem; 
                        background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
@@ -1531,6 +1758,8 @@ def main():
             else:
                 with st.spinner("AI 에이전트 팀이 협업 중입니다..."):
                     res = run_workflow(user_input)
+                    res["app_mode"] = st.session_state.get("app_mode", "신속")
+
 
                     archive_id = None
                     if sb:
