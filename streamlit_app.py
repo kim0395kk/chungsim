@@ -1935,11 +1935,11 @@ def main():
         """, unsafe_allow_html=True)
             
         a = res.get("analysis", {})
-            st.markdown(f"""
-                <div style='background: #eff6ff; padding: 1rem; border-radius: 8px; border-left: 4px solid #2563eb; margin-bottom: 1rem;'>
-                    <p style='margin: 0 0 0.5rem 0; color: #1e40af; font-weight: 600;'>유형: {a.get('case_type','')}</p>
-                    <p style='margin: 0; color: #1e40af;'>쟁점: {", ".join(a.get("core_issue", []))}</p>
-                </div>
+        st.markdown(f"""
+            <div style='background: #eff6ff; padding: 1rem; border-radius: 8px; border-left: 4px solid #2563eb; margin-bottom: 1rem;'>
+                <p style='margin: 0 0 0.5rem 0; color: #1e40af; font-weight: 600;'>유형: {a.get('case_type','')}</p>
+                <p style='margin: 0; color: #1e40af;'>쟁점: {", ".join(a.get("core_issue", []))}</p>
+            </div>
             """, unsafe_allow_html=True)
             
             with st.expander("📋 누락정보/증빙/리스크/다음행동 보기", expanded=False):
