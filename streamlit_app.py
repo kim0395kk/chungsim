@@ -118,59 +118,299 @@ st.set_page_config(layout="wide", page_title="AI Bureau: The Legal Glass", page_
 st.markdown(
     """
 <style>
-    .stApp { background-color: #f3f4f6; }
-
+    /* ====================== */
+    /* Design Tokens */
+    /* ====================== */
+    :root {
+        /* Colors - Primary Palette */
+        --primary-50: #eff6ff;
+        --primary-100: #dbeafe;
+        --primary-200: #bfdbfe;
+        --primary-500: #3b82f6;
+        --primary-600: #2563eb;
+        --primary-700: #1d4ed8;
+        --primary-800: #1e40af;
+        
+        /* Colors - Neutral Palette */
+        --neutral-50: #f9fafb;
+        --neutral-100: #f3f4f6;
+        --neutral-200: #e5e7eb;
+        --neutral-300: #d1d5db;
+        --neutral-400: #9ca3af;
+        --neutral-500: #6b7280;
+        --neutral-600: #4b5563;
+        --neutral-700: #374151;
+        --neutral-800: #1f2937;
+        --neutral-900: #111827;
+        
+        /* Colors - Semantic */
+        --success-500: #10b981;
+        --success-600: #059669;
+        --warning-500: #f59e0b;
+        --error-500: #ef4444;
+        --error-600: #dc2626;
+        
+        /* Spacing */
+        --space-xs: 0.25rem;
+        --space-sm: 0.5rem;
+        --space-md: 1rem;
+        --space-lg: 1.5rem;
+        --space-xl: 2rem;
+        --space-2xl: 3rem;
+        
+        /* Border Radius */
+        --radius-sm: 0.375rem;
+        --radius-md: 0.5rem;
+        --radius-lg: 0.75rem;
+        --radius-xl: 1rem;
+        
+        /* Shadows */
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        
+        /* Typography */
+        --font-serif: 'Batang', 'Nanum Myeongjo', serif;
+        --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+    }
+    
+    /* ====================== */
+    /* Base Styles */
+    /* ====================== */
+    .stApp { 
+        background: linear-gradient(135deg, var(--neutral-50) 0%, var(--primary-50) 100%);
+        font-family: var(--font-sans);
+    }
+    
+    /* ====================== */
+    /* Document Paper Style */
+    /* ====================== */
     .paper-sheet {
         background-color: white;
         width: 100%;
         max-width: 210mm;
         min-height: 297mm;
-        padding: 25mm;
-        margin: auto;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        font-family: 'Batang', serif;
-        color: #111;
-        line-height: 1.6;
+        padding: 28mm;
+        margin: var(--space-xl) auto;
+        box-shadow: var(--shadow-2xl);
+        font-family: var(--font-serif);
+        color: var(--neutral-900);
+        line-height: 1.8;
         position: relative;
+        border-radius: var(--radius-sm);
     }
 
-    .doc-header { text-align: center; font-size: 22pt; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px; }
-    .doc-info { display: flex; justify-content: space-between; font-size: 11pt; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; gap:10px; flex-wrap:wrap; }
-    .doc-body { font-size: 12pt; text-align: justify; white-space: normal; }
-    .doc-footer { text-align: center; font-size: 20pt; font-weight: bold; margin-top: 80px; letter-spacing: 5px; }
-    .stamp { position: absolute; bottom: 85px; right: 80px; border: 3px solid #cc0000; color: #cc0000; padding: 5px 10px; font-size: 14pt; font-weight: bold; transform: rotate(-15deg); opacity: 0.8; border-radius: 5px; }
+    .doc-header { 
+        text-align: center; 
+        font-size: 24pt; 
+        font-weight: 900; 
+        margin-bottom: var(--space-2xl); 
+        letter-spacing: 3px;
+        color: var(--neutral-900);
+        padding-bottom: var(--space-lg);
+        border-bottom: 3px double var(--neutral-800);
+    }
+    
+    .doc-info { 
+        display: flex; 
+        justify-content: space-between; 
+        font-size: 11pt; 
+        background: var(--neutral-50);
+        padding: var(--space-lg);
+        border-radius: var(--radius-md);
+        margin-bottom: var(--space-xl);
+        gap: var(--space-md);
+        flex-wrap: wrap;
+        border-left: 4px solid var(--primary-600);
+    }
+    
+    .doc-info span {
+        font-weight: 600;
+        color: var(--neutral-700);
+    }
+    
+    .doc-body { 
+        font-size: 12pt; 
+        text-align: justify; 
+        white-space: normal;
+        color: var(--neutral-800);
+    }
+    
+    .doc-footer { 
+        text-align: center; 
+        font-size: 22pt; 
+        font-weight: bold; 
+        margin-top: 100px; 
+        letter-spacing: 6px;
+        color: var(--neutral-900);
+    }
+    
+    .stamp { 
+        position: absolute; 
+        bottom: 90px; 
+        right: 85px; 
+        border: 4px solid var(--error-600); 
+        color: var(--error-600); 
+        padding: var(--space-sm) var(--space-md); 
+        font-size: 15pt; 
+        font-weight: 900; 
+        transform: rotate(-15deg); 
+        opacity: 0.85; 
+        border-radius: var(--radius-md);
+        background: rgba(220, 38, 38, 0.05);
+    }
 
+    /* ====================== */
+    /* Lawbot Button */
+    /* ====================== */
     .lawbot-btn {
         display: inline-block;
         width: 100%;
-        padding: 12px 14px;
-        border-radius: 12px;
+        padding: var(--space-lg) var(--space-md);
+        border-radius: var(--radius-xl);
         text-decoration: none !important;
-        font-weight: 900;
-        letter-spacing: 0.2px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
         text-align: center;
-        background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 55%, #60a5fa 100%);
-        color: #ffffff !important;
-        border: 1px solid rgba(255,255,255,0.25);
-        box-shadow: 0 10px 22px rgba(37, 99, 235, 0.25);
+        background: linear-gradient(135deg, var(--primary-700) 0%, var(--primary-600) 50%, var(--primary-500) 100%);
+        color: white !important;
+        border: none;
+        box-shadow: var(--shadow-lg);
+        transition: all 0.2s ease;
+        font-size: 1rem;
     }
-    .lawbot-btn:hover { filter: brightness(1.03); transform: translateY(-1px); }
-    .lawbot-sub { font-size: 0.82rem; opacity: 0.92; margin-top: 6px; display: block; color: rgba(255,255,255,0.92) !important; font-weight: 700; }
+    
+    .lawbot-btn:hover { 
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-xl);
+        filter: brightness(1.05);
+    }
+    
+    .lawbot-sub { 
+        font-size: 0.8rem; 
+        opacity: 0.9; 
+        margin-top: var(--space-sm); 
+        display: block; 
+        color: rgba(255,255,255,0.95) !important; 
+        font-weight: 500;
+        letter-spacing: 0.2px;
+    }
 
-    /* Sidebar history */
-    div[data-testid="stSidebar"] button[kind="secondary"]{
-        width:100%;
-        text-align:left !important;
-        justify-content:flex-start !important;
-        padding: 0.55rem 0.65rem !important;
-        border-radius: 10px !important;
-        border: 1px solid #e5e7eb !important;
+    /* ====================== */
+    /* Sidebar Styles */
+    /* ====================== */
+    div[data-testid="stSidebar"] {
+        background: white;
+        border-right: 1px solid var(--neutral-200);
+    }
+    
+    div[data-testid="stSidebar"] button[kind="secondary"] {
+        width: 100%;
+        text-align: left !important;
+        justify-content: flex-start !important;
+        padding: var(--space-md) !important;
+        border-radius: var(--radius-lg) !important;
+        border: 1px solid var(--neutral-200) !important;
         background: white !important;
-        color: #111827 !important;
-        font-weight: 650 !important;
+        color: var(--neutral-800) !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+        margin-bottom: var(--space-xs) !important;
     }
-    div[data-testid="stSidebar"] button[kind="secondary"]:hover{ background: #f3f4f6 !important; }
+    
+    div[data-testid="stSidebar"] button[kind="secondary"]:hover { 
+        background: var(--neutral-50) !important;
+        border-color: var(--primary-300) !important;
+        transform: translateX(2px);
+    }
 
+    /* ====================== */
+    /* Form Elements */
+    /* ====================== */
+    .stTextInput > div > div > input,
+    .stTextArea > div > div > textarea {
+        border-radius: var(--radius-lg) !important;
+        border: 2px solid var(--neutral-200) !important;
+        padding: var(--space-md) !important;
+        font-family: var(--font-sans) !important;
+        transition: all 0.2s ease !important;
+    }
+    
+    .stTextInput > div > div > input:focus,
+    .stTextArea > div > div > textarea:focus {
+        border-color: var(--primary-500) !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+    }
+    
+    /* ====================== */
+    /* Buttons */
+    /* ====================== */
+    .stButton > button {
+        border-radius: var(--radius-lg) !important;
+        padding: var(--space-md) var(--space-xl) !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease !important;
+        border: none !important;
+    }
+    
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, var(--primary-600) 0%, var(--primary-700) 100%) !important;
+        color: white !important;
+        box-shadow: var(--shadow-md) !important;
+    }
+    
+    .stButton > button[kind="primary"]:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: var(--shadow-lg) !important;
+    }
+
+    /* ====================== */
+    /* Expanders */
+    /* ====================== */
+    .streamlit-expanderHeader {
+        background: var(--neutral-50) !important;
+        border-radius: var(--radius-lg) !important;
+        padding: var(--space-md) !important;
+        font-weight: 600 !important;
+        border: 1px solid var(--neutral-200) !important;
+    }
+    
+    /* ====================== */
+    /* Info/Warning Boxes */
+    /* ====================== */
+    .stAlert {
+        border-radius: var(--radius-lg) !important;
+        border: none !important;
+        padding: var(--space-lg) !important;
+    }
+    
+    /* ====================== */
+    /* Chat Messages */
+    /* ====================== */
+    .stChatMessage {
+        border-radius: var(--radius-lg) !important;
+        padding: var(--space-lg) !important;
+        margin-bottom: var(--space-md) !important;
+        box-shadow: var(--shadow-sm) !important;
+    }
+
+    /* ====================== */
+    /* Headers & Text */
+    /* ====================== */
+    h1, h2, h3 {
+        color: var(--neutral-900) !important;
+        font-weight: 700 !important;
+    }
+    
+    h1 { font-size: 2.5rem !important; }
+    h2 { font-size: 1.75rem !important; margin-top: var(--space-xl) !important; }
+    h3 { font-size: 1.25rem !important; margin-top: var(--space-lg) !important; }
+
+    /* ====================== */
+    /* Hide Default Elements */
+    /* ====================== */
     header [data-testid="stToolbar"] { display: none !important; }
     header [data-testid="stDecoration"] { display: none !important; }
     header { height: 0px !important; }
@@ -1174,26 +1414,68 @@ def main():
         st.sidebar.error("Supabase 연결 정보(secrets)가 없습니다.")
         st.sidebar.caption("SUPABASE_URL / SUPABASE_ANON_KEY 필요")
 
-    st.title("🏢 AI 행정관 Pro 충주시청")
-    st.caption("문의 kim0395kk@korea.kr  |  Govable AI 에이전트")
+    st.markdown("""
+        <div style='text-align: center; padding: 2rem 0 3rem 0;'>
+            <h1 style='font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem; 
+                       background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+                       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                       background-clip: text;'>
+                🏢 AI 행정관 Pro
+            </h1>
+            <p style='font-size: 1.1rem; color: #4b5563; font-weight: 500; margin-bottom: 0.75rem;'>
+                충주시청 스마트 행정 솔루션
+            </p>
+            <p style='font-size: 0.9rem; color: #6b7280;'>
+                문의 <a href='mailto:kim0395kk@korea.kr' style='color: #2563eb; text-decoration: none;'>kim0395kk@korea.kr</a> | Govable AI 에이전트
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
 
-    ai_ok = "✅AI" if llm_service.is_available() else "❌AI"
-    law_ok = "✅LAW" if bool(get_general_secret("LAW_API_ID")) else "❌LAW"
-    nv_ok = "✅NEWS" if bool(get_general_secret("NAVER_CLIENT_ID")) else "❌NEWS"
-    db_ok = "✅DB" if sb else "❌DB"
-    st.caption(f"상태: {ai_ok} | {law_ok} | {nv_ok} | {db_ok} | ver {APP_VERSION}")
+    ai_ok = "✅ AI" if llm_service.is_available() else "❌ AI"
+    law_ok = "✅ LAW" if bool(get_general_secret("LAW_API_ID")) else "❌ LAW"
+    nv_ok = "✅ NEWS" if bool(get_general_secret("NAVER_CLIENT_ID")) else "❌ NEWS"
+    db_ok = "✅ DB" if sb else "❌ DB"
+    
+    st.markdown(f"""
+        <div style='text-align: center; padding: 0.75rem 1.5rem; background: white; 
+                    border-radius: 12px; margin-bottom: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                    border-left: 4px solid #2563eb;'>
+            <span style='font-size: 0.9rem; color: #374151; font-weight: 600;'>
+                시스템 상태: {ai_ok} · {law_ok} · {nv_ok} · {db_ok}
+            </span>
+            <span style='font-size: 0.85rem; color: #9ca3af; margin-left: 1rem;'>
+                v{APP_VERSION}
+            </span>
+        </div>
+    """, unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1, 1.15], gap="large")
 
     with col_left:
-        st.markdown("### 🗣️ 업무 지시")
+        st.markdown("""
+            <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem;'>
+                <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                    🗣️ 업무 지시
+                </h3>
+            </div>
+        """, unsafe_allow_html=True)
+        
         user_input = st.text_area(
             "업무 내용",
-            height=170,
+            height=190,
             placeholder="예시\n- 상황: (무슨 일 / 어디 / 언제 / 증거 유무...)\n- 쟁점: (요건/절차/근거...)\n- 요청: (원하는 결과물: 회신/사전통지/처분 등)",
             label_visibility="collapsed",
         )
-        st.warning("⚠️ 민감정보(성명·연락처·주소·차량번호 등) 입력 금지")
+        
+        st.markdown("""
+            <div style='background: #fef3c7; border-left: 4px solid #f59e0b; 
+                        padding: 1rem; border-radius: 8px; margin: 1rem 0;'>
+                <p style='margin: 0; color: #92400e; font-size: 0.9rem; font-weight: 500;'>
+                    ⚠️ 민감정보(성명·연락처·주소·차량번호 등) 입력 금지
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
 
         if st.button("⚡ 스마트 분석 시작", type="primary", use_container_width=True):
             if not user_input:
@@ -1219,11 +1501,24 @@ def main():
             if pack.get("url"):
                 render_lawbot_button(pack["url"])
 
-            st.subheader("🧠 케이스 분석(에이전트)")
+            st.markdown("""
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        🧠 케이스 분석
+                    </h3>
+                </div>
+            """, unsafe_allow_html=True)
+            
             a = res.get("analysis", {})
-            st.write(f"- 유형: **{a.get('case_type','')}**")
-            if a.get("core_issue"): st.write("- 쟁점:", ", ".join(a["core_issue"]))
-            with st.expander("누락정보/증빙/리스크/다음행동 보기", expanded=False):
+            st.markdown(f"""
+                <div style='background: #eff6ff; padding: 1rem; border-radius: 8px; border-left: 4px solid #2563eb; margin-bottom: 1rem;'>
+                    <p style='margin: 0 0 0.5rem 0; color: #1e40af; font-weight: 600;'>유형: {a.get('case_type','')}</p>
+                    <p style='margin: 0; color: #1e40af;'>쟁점: {", ".join(a.get("core_issue", []))}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            with st.expander("📋 누락정보/증빙/리스크/다음행동 보기", expanded=False):
                 st.markdown("**추가 확인 질문**")
                 for x in a.get("required_facts", []): st.write("- ", x)
                 st.markdown("**필요 증빙**")
@@ -1233,20 +1528,55 @@ def main():
                 st.markdown("**권장 다음 행동**")
                 for x in a.get("recommended_next_action", []): st.write("- ", x)
 
-            st.subheader("📜 법령 근거(강화)")
+            st.markdown("""
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        📜 법령 근거
+                    </h3>
+                </div>
+            """, unsafe_allow_html=True)
             st.markdown(res.get("law", ""))
 
-            st.subheader("📰 뉴스/사례")
+            st.markdown("""
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        📰 뉴스/사례
+                    </h3>
+                </div>
+            """, unsafe_allow_html=True)
             st.markdown(res.get("search", ""))
 
-            st.subheader("🧭 처리 가이드(주무관)")
+            st.markdown("""
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        🧭 처리 가이드
+                    </h3>
+                </div>
+            """, unsafe_allow_html=True)
             st.markdown(res.get("strategy", ""))
 
-            st.subheader("🧨 예상 반발/대응(에이전트)")
+            st.markdown("""
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        🧨 예상 반발/대응
+                    </h3>
+                </div>
+            """, unsafe_allow_html=True)
             for ob in res.get("objections", [])[:7]:
                 st.markdown(f"- **반발**: {ob.get('objection')}\n  - **대응**: {ob.get('response')}\n  - **기록 포인트**: {ob.get('record_point')}")
 
-            st.subheader("🗺️ 절차 플랜(타임라인/서식/체크리스트)")
+            st.markdown("""
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        🗺️ 절차 플랜
+                    </h3>
+                </div>
+            """, unsafe_allow_html=True)
             proc = res.get("procedure", {})
             with st.expander("타임라인", expanded=True):
                 for step in proc.get("timeline", []):
@@ -1263,11 +1593,19 @@ def main():
 
     with col_right:
         if "workflow_result" not in st.session_state:
-            st.markdown(
-                "<div style='text-align:center;padding:120px;color:#aaa;background:white;border-radius:12px;border:2px dashed #ddd;'>"
-                "<h3>📄 Document Preview</h3><p>왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.</p></div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("""
+                <div style='text-align: center; padding: 6rem 2rem; 
+                            background: white; border-radius: 16px; 
+                            border: 2px dashed #d1d5db; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'>
+                    <div style='font-size: 4rem; margin-bottom: 1rem; opacity: 0.5;'>📄</div>
+                    <h3 style='color: #6b7280; font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem;'>
+                        Document Preview
+                    </h3>
+                    <p style='color: #9ca3af; font-size: 1rem; line-height: 1.6;'>
+                        왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
             return
 
         res = st.session_state.workflow_result
@@ -1275,7 +1613,14 @@ def main():
         meta = res.get("meta") or {}
         archive_id = res.get("archive_id") or st.session_state.get("current_archive_id")
 
-        st.subheader("📄 공문서")
+        st.markdown("""
+            <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem;'>
+                <h3 style='margin: 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                    📄 공문서
+                </h3>
+            </div>
+        """, unsafe_allow_html=True)
         if not doc:
             st.warning("공문 생성 결과(doc)가 비어 있습니다.")
         else:
@@ -1303,7 +1648,14 @@ def main():
 """
             st.markdown(html, unsafe_allow_html=True)
 
-        st.subheader("💬 후속 질문(복원됨)")
+        st.markdown("""
+            <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                <h3 style='margin: 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                    💬 후속 질문
+                </h3>
+            </div>
+        """, unsafe_allow_html=True)
         if not archive_id:
             st.info("저장된 archive_id가 없습니다. (DB 저장 실패 가능)")
             return
