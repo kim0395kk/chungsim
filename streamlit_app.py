@@ -1934,7 +1934,7 @@ def main():
             </div>
         """, unsafe_allow_html=True)
             
-            a = res.get("analysis", {})
+        a = res.get("analysis", {})
             st.markdown(f"""
                 <div style='background: #eff6ff; padding: 1rem; border-radius: 8px; border-left: 4px solid #2563eb; margin-bottom: 1rem;'>
                     <p style='margin: 0 0 0.5rem 0; color: #1e40af; font-weight: 600;'>유형: {a.get('case_type','')}</p>
