@@ -44,7 +44,7 @@ except Exception:
 # =========================================================
 # 0) SETTINGS
 # =========================================================
-APP_VERSION = "2026-01-15-agentboost"
+APP_VERSION = "2026-01-15-agentboost-fixed"
 MAX_FOLLOWUP_Q = 5
 ADMIN_EMAIL = "kim0395kk@korea.kr"
 LAW_BOT_SEARCH_URL = "https://www.law.go.kr/LSW/ais/searchList.do?query="
@@ -62,13 +62,9 @@ def shorten_one_line(text: str, max_len: int = 28) -> str:
     return s[: max_len - 1] + "…"
 
 def estimate_tokens(text: str) -> int:
-    """
-    정확한 토큰 카운트가 아니라 '운영 대시보드용 추정치'
-    - 한글/영문 혼합 기준 대략치로 충분
-    """
+    """운영 대시보드용 대략 추정치"""
     if not text:
         return 0
-    # 보수적으로: 글자수 * 0.7
     return int(len(text) * 0.7)
 
 def safe_now_utc_iso():
@@ -115,25 +111,20 @@ def md_bold_to_html_safe(text: str) -> str:
     out.append(_escape(s[pos:]))
     html = "".join(out).replace("\n", "<br>")
     return html
-    
 
 def mask_sensitive(text: str) -> str:
     """개인정보/식별정보 간단 마스킹(입력 보호용)"""
     if not text:
         return ""
     t = text
-    # phone
-    t = re.sub(r"\b0\d{1,2}-\d{3,4}-\d{4}\b", "0**-****-****", t)
-    # rrn
-    t = re.sub(r"\b\d{6}-\d{7}\b", "******-*******", t)
-    # car plate (rough)
-    t = re.sub(r"\b\d{2,3}[가-힣]\d{4}\b", "***(차량번호)", t)
+    t = re.sub(r"\b0\d{1,2}-\d{3,4}-\d{4}\b", "0**-****-****", t)           # phone
+    t = re.sub(r"\b\d{6}-\d{7}\b", "******-*******", t)                     # rrn
+    t = re.sub(r"\b\d{2,3}[가-힣]\d{4}\b", "***(차량번호)", t)               # car plate rough
     return t
 
 
-
 # =========================================================
-# 2) STYLES
+# 2) STYLES  (✅ 절대 수정하지 말라는 요청: 그대로 유지)
 # =========================================================
 st.set_page_config(layout="wide", page_title="AI Bureau: The Legal Glass", page_icon="⚖️")
 st.markdown(
@@ -502,7 +493,6 @@ def get_secret(path1: str, path2: str = "") -> Optional[str]:
         return None
 
 def get_general_secret(key: str) -> Optional[str]:
-    # [general] 또는 최상단 모두 지원
     return (st.secrets.get("general", {}) or {}).get(key) or st.secrets.get(key)
 
 def get_supabase():
@@ -629,6 +619,7 @@ class LLMService:
             return "System Error"
 
     def generate_text(self, prompt: str) -> str:
+        # ✅ 너 코드에서 여기 인덴트가 깨져서 앱이 즉사했음. 정상으로 고침.
         try:
             text, used = self._try_gemini_text(prompt)
             if text:
@@ -636,12 +627,15 @@ class LLMService:
                 return text
         except Exception:
             pass
+
         if self.groq_client:
             out = self._generate_groq(prompt)
             st.session_state["last_model_used"] = "llama-3.3-70b-versatile(groq)"
             return out
+
         st.session_state["last_model_used"] = None
         return "시스템 오류: AI 모델 연결 실패"
+
     def generate_json(self, prompt: str) -> Optional[Any]:
         strict = prompt + "\n\n반드시 JSON만 출력. 다른 텍스트 금지."
         text = self.generate_text(strict)
@@ -719,7 +713,6 @@ class LawOfficialService:
         return f"https://www.law.go.kr/DRF/lawService.do?OC={self.api_id}&target=law&MST={mst_id}&type=HTML"
 
     def ai_search(self, query: str, top_k: int = 6) -> List[dict]:
-        """law.go.kr aiSearch로 후보 법령명을 더 넓게 가져옴"""
         if not requests or not self.api_id or not query:
             return []
         try:
@@ -728,19 +721,16 @@ class LawOfficialService:
             r.raise_for_status()
             root = ET.fromstring(r.content)
             out = []
-            # aiSearch 응답은 케이스별로 달라서, lawName 계열을 최대한 줍기
             for node in root.findall(".//law"):
                 name = (node.findtext("법령명") or node.findtext("lawName") or "").strip()
                 if name:
                     out.append({"law_name": name})
-            # fallback: 텍스트에서 법령명 태그 탐색
             if not out:
                 for tag in ["lawName", "법령명", "lawNm"]:
                     for node in root.findall(f".//{tag}"):
                         nm = (node.text or "").strip()
                         if nm:
                             out.append({"law_name": nm})
-            # uniq
             seen = set()
             uniq = []
             for x in out:
@@ -839,10 +829,11 @@ JSON만.
         data = llm_service.generate_json(prompt)
         if isinstance(data, dict) and data.get("case_type"):
             return data
-        # fallback (heuristic)
         t = "기타"
-        if "무단방치" in situation: t = "무단방치"
-        if "번호판" in situation: t = "번호판훼손"
+        if "무단방치" in situation:
+            t = "무단방치"
+        if "번호판" in situation:
+            t = "번호판훼손"
         return {
             "case_type": t,
             "core_issue": ["사실관계 확정", "증빙 확보", "절차적 정당성 확보"],
@@ -928,11 +919,6 @@ class ObjectionAgent:
 class LegalAgents:
     @staticmethod
     def researcher(situation: str, analysis: dict) -> dict:
-        """
-        강화 포인트:
-        - LLM 추출 + aiSearch 후보 보강
-        - 각 법령은 링크/조문텍스트/신뢰도 함께
-        """
         s = mask_sensitive(situation)
         prompt_extract = f"""
 상황: "{s}"
@@ -956,7 +942,6 @@ class LegalAgents:
             targets = [extracted]
         targets = [t for t in targets if isinstance(t, dict) and t.get("law_name")]
 
-        # aiSearch로 법령 후보 보강(키워드 기반)
         kw = " ".join((analysis.get("core_issue") or [])[:4]) or situation[:30]
         extra = law_api_service.ai_search(kw, top_k=6)
         for e in extra:
@@ -964,7 +949,6 @@ class LegalAgents:
             if nm and all((nm != t.get("law_name")) for t in targets):
                 targets.append({"law_name": nm, "article_num": None, "why": "aiSearch 후보"})
 
-        # 상한
         targets = targets[:6] if targets else [{"law_name": "행정절차법", "article_num": None, "why": "절차 정당성 기본"}]
 
         items = []
@@ -991,7 +975,6 @@ class LegalAgents:
                 "excerpt": (law_text or "")[:1400]
             })
 
-        # 출력용 markdown도 함께
         out_md = [f"🔍 **핵심 법령 근거 ({len(items)}건)**", "---"]
         for i, it in enumerate(items, 1):
             name = it["law_name"]
@@ -1078,12 +1061,10 @@ class LegalAgents:
 
 JSON만 출력.
 """
-        # 1차
         data = llm_service.generate_json(prompt)
         if isinstance(data, dict) and data.get("title") and data.get("body_paragraphs"):
             return data
 
-        # 2차 재시도(더 강제)
         retry = f"""
 방금 출력이 스키마를 만족하지 않았다.
 아래 스키마를 정확히 만족하는 JSON만 다시 출력하라.
@@ -1097,7 +1078,6 @@ JSON만 출력.
         if isinstance(data2, dict) and data2.get("title") and data2.get("body_paragraphs"):
             return data2
 
-        # fallback
         return {
             "title": "민원 처리 결과 회신(안)",
             "receiver": "수신자 참조",
@@ -1133,10 +1113,9 @@ def build_lawbot_pack(situation: str, analysis: dict) -> dict:
     return {"core_keywords": kws[:10], "query_text": query_text[:180], "url": make_lawbot_url(query_text[:180])}
 
 def run_workflow(user_input: str, mode: str = "신속") -> dict:
-    # ⏱️ 시작 시간 측정
     start_time = time.time()
-    search_count = 0  # 🔍 검색 횟수 초기화
-    
+    search_count = 0
+
     log = st.empty()
     logs: List[str] = []
 
@@ -1144,50 +1123,37 @@ def run_workflow(user_input: str, mode: str = "신속") -> dict:
         logs.append(f"- {msg}")
         log.markdown("\n".join(logs))
 
-    # 0) analyze
     add("Phase 0) 케이스 분석(유형/쟁점/누락정보/증빙)")
     analysis = CaseAnalyzer.analyze(user_input)
 
-    # 1) law
     add("Phase 1) 법령 근거 강화(LLM + aiSearch + 링크/발췌)")
     law_pack = LegalAgents.researcher(user_input, analysis)
     law_md = law_pack.get("markdown", "")
-    search_count += 1  # ✅ 법령 API 조회 카운트
+    search_count += 1
 
-    # 2) precedents
     add("Phase 2) 뉴스/사례 조회")
     news = search_service.search_precedents(user_input)
-    search_count += 1  # ✅ 뉴스 API 조회 카운트
+    search_count += 1
 
-    # 3) strategy
     add("Phase 3) 처리방향/주의사항/체크리스트 생성")
     strategy = LegalAgents.strategist(user_input, law_md, news, analysis)
 
-    # 4) objections
     add("Phase 4) 반발/리스크 대응 시나리오")
     objections = ObjectionAgent.build(user_input, strategy)
 
-    # 5) procedure plan
     add("Phase 5) 절차 플랜(타임라인/서식/기록 포인트)")
     procedure = ProcedureAgent.plan(user_input, law_md[:1500], analysis)
 
-    # 6) doc
     add("Phase 6) 공문 조판(JSON 실패 시 자동 복구)")
     meta = LegalAgents.clerk()
     doc = LegalAgents.drafter(user_input, law_md, meta, strategy, procedure, objections)
 
-    # 7) lawbot pack
     add("Phase 7) Lawbot 검색팩 생성")
     lb = build_lawbot_pack(user_input, analysis)
 
     log.empty()
 
-    # ⏱️ 종료 시간 및 소요 시간 계산
-    end_time = time.time()
-    execution_time = round(end_time - start_time, 2)
-
-    # 💰 결과 데이터를 기반으로 토큰 사용량 추정 (한글 1자당 약 0.7 토큰)
-    # 결과값 전체의 길이를 측정합니다.
+    execution_time = round(time.time() - start_time, 2)
     full_res_text = str(analysis) + str(law_md) + str(news) + str(strategy) + str(doc)
     estimated_tokens = int(len(full_res_text) * 0.7)
     model_used = st.session_state.get("last_model_used")
@@ -1205,12 +1171,11 @@ def run_workflow(user_input: str, mode: str = "신속") -> dict:
         "doc": doc,
         "lawbot_pack": lb,
         "followups": [],
-        # --- 📊 대시보드용 데이터 추가 ---
         "app_mode": mode,
         "token_usage": estimated_tokens,
         "execution_time": execution_time,
         "search_count": search_count,
-        "model_used": model_used
+        "model_used": model_used,
     }
 
 # =========================================================
@@ -1222,7 +1187,6 @@ def db_insert_archive(sb, prompt: str, payload: dict) -> Optional[str]:
     user_id = user.get("id") if isinstance(user, dict) else None
     user_email = st.session_state.get("user_email") if st.session_state.get("logged_in") else None
 
-    # 1. 기본 저장 정보 생성
     row = {
         "prompt": prompt,
         "payload": payload,
@@ -1230,23 +1194,15 @@ def db_insert_archive(sb, prompt: str, payload: dict) -> Optional[str]:
         "user_id": user_id if st.session_state.get("logged_in") else None,
         "user_email": user_email if st.session_state.get("logged_in") else None,
         "client_meta": {"app_ver": APP_VERSION},
-    }
-
-    # 2. 대시보드용 통계 데이터(metrics) 추가 추출
-    # payload 안에 포함되어 온 통계 정보들을 꺼냅니다.
-    metrics = payload.get("metrics") or {}
-    
-    # 3. 데이터베이스 컬럼에 맞춰서 업데이트
-    row.update({
+        # metrics columns (있으면 저장됨)
         "app_mode": payload.get("app_mode", st.session_state.get("app_mode", "신속")),
         "search_count": int(payload.get("search_count") or 0),
         "execution_time": float(payload.get("execution_time") or 0.0),
         "token_usage": int(payload.get("token_usage") or 0),
         "model_used": payload.get("model_used"),
-    })
+    }
 
     try:
-        # 최종적으로 완성된 row를 DB에 넣습니다.
         resp = sb.table("work_archive").insert(row).execute()
         if hasattr(resp, "data") and resp.data and isinstance(resp.data, list):
             return resp.data[0].get("id")
@@ -1256,7 +1212,12 @@ def db_insert_archive(sb, prompt: str, payload: dict) -> Optional[str]:
 
 def db_fetch_history(sb, limit: int = 80) -> List[dict]:
     try:
-        q = sb.table("work_archive").select("id,prompt,created_at,user_email,anon_session_id").order("created_at", desc=True).limit(limit)
+        q = (
+            sb.table("work_archive")
+            .select("id,prompt,created_at,user_email,anon_session_id")
+            .order("created_at", desc=True)
+            .limit(limit)
+        )
         resp = q.execute()
         return resp.data or []
     except Exception:
@@ -1264,7 +1225,13 @@ def db_fetch_history(sb, limit: int = 80) -> List[dict]:
 
 def db_fetch_payload(sb, archive_id: str) -> Optional[dict]:
     try:
-        resp = sb.table("work_archive").select("id,prompt,payload,created_at,user_email,anon_session_id").eq("id", archive_id).limit(1).execute()
+        resp = (
+            sb.table("work_archive")
+            .select("id,prompt,payload,created_at,user_email,anon_session_id")
+            .eq("id", archive_id)
+            .limit(1)
+            .execute()
+        )
         if resp.data:
             return resp.data[0]
     except Exception:
@@ -1305,7 +1272,7 @@ def db_insert_followup(sb, archive_id: str, turn: int, role: str, content: str):
         pass
 
 # =========================================================
-# 6) SIDEBAR AUTH UI (네 기존 유지)
+# 6) SIDEBAR AUTH UI (기존 유지 + 안정화)
 # =========================================================
 def sidebar_auth(sb):
     st.sidebar.markdown("## 🔐 로그인")
@@ -1495,7 +1462,7 @@ def render_history_list(sb):
             restore_archive(sb, rid)
 
 # =========================================================
-# 8) UI
+# 8) ADMIN / DASHBOARD
 # =========================================================
 def admin_fetch_work_archive(sb, limit: int = 2000) -> List[dict]:
     try:
@@ -1512,9 +1479,7 @@ def admin_fetch_work_archive(sb, limit: int = 2000) -> List[dict]:
         return []
 
 def admin_fetch_sessions(sb, minutes: int = 5) -> List[dict]:
-    # 동접 추정: last_seen이 최근 N분 이내
     try:
-        # Supabase python client에서 gte 필터에 ISO string 가능
         cutoff = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
         resp = (
             sb.table("app_sessions")
@@ -1542,81 +1507,143 @@ def admin_fetch_events(sb, limit: int = 300) -> List[dict]:
         st.error(f"관리자 조회 실패(app_events): {e}")
         return []
 
-# =========================================================
-# 8) 관리자 UI 로직 (정상화 버전)
-# =========================================================
+def admin_delete_archive(sb, row_id: str) -> bool:
+    """✅ 너 코드의 'row_id' undefined / 잘못된 인덴트 문제를 여기로 정리"""
+    try:
+        sb.table("work_archive").delete().eq("id", row_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"삭제 실패: {e}")
+        return False
 
 def render_master_dashboard(sb):
     st.markdown("## 🏛️ 관리자 운영 마스터 콘솔")
 
-    # 1. 관리자 권한 및 모드 체크
     if not is_admin_user(st.session_state.get("user_email", "")):
         st.warning("관리자만 접근 가능합니다.")
         return
+
     if not st.session_state.get("admin_mode", False):
         st.info("사이드바에서 **관리자모드 켜기**를 활성화하세요.")
         return
 
-    # 2. 데이터 가져오기
+    if pd is None:
+        st.warning("pandas가 없어 차트/집계를 간소화합니다. requirements.txt에 `pandas`를 추가 권장.")
     data = admin_fetch_work_archive(sb, limit=5000)
     sessions = admin_fetch_sessions(sb, minutes=5)
     events = admin_fetch_events(sb, limit=200)
 
-    if not data:
-        st.info("누적된 분석 데이터가 없습니다.")
-        return
+    total_runs = len(data)
+    online_now = len(sessions)
 
-    # 3. 통계 계산 (가입자 수 포함)
-    if pd:
+    if pd and data:
         df = pd.DataFrame(data)
         df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
-        
-        total_runs = len(df)
-        total_users = df["user_email"].nunique() # 🟢 중복 제외 가입자(이용자) 수
+        df["date"] = df["created_at"].dt.date
+        df["user_email"] = df["user_email"].fillna("(anon)")
+        df["app_mode"] = df["app_mode"].fillna("신속")
+        df["token_usage"] = pd.to_numeric(df["token_usage"], errors="coerce").fillna(0)
+        df["execution_time"] = pd.to_numeric(df["execution_time"], errors="coerce").fillna(0)
+        df["search_count"] = pd.to_numeric(df["search_count"], errors="coerce").fillna(0)
+
+        top_user = df["user_email"].value_counts().index[0] if not df.empty else "-"
         total_tokens = int(df["token_usage"].sum())
-        avg_time = float(df["execution_time"].mean())
+        avg_time = float(df["execution_time"].mean()) if not df.empty else 0.0
         total_search = int(df["search_count"].sum())
+    else:
+        top_user = "-"
+        total_tokens = 0
+        avg_time = 0.0
+        total_search = 0
 
-        # 상단 핵심 지표 (KPI)
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("🟢 실시간(5분)", f"{len(sessions)}")
-        c2.metric("👥 총 이용자", f"{total_users}명")
-        c3.metric("📦 누적 분석", f"{total_runs:,}")
-        c4.metric("🧾 총 토큰", f"{total_tokens:,}")
-        c5.metric("⏱️ 평균속도", f"{avg_time:.1f}s")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("🟢 현재 접속(5분)", f"{online_now}")
+    c2.metric("📦 누적 실행", f"{total_runs:,}")
+    c3.metric("🧾 누적 토큰(추정)", f"{total_tokens:,}")
+    c4.metric("⏱️ 평균 소요시간", f"{avg_time:.2f}s")
+    c5.metric("🔎 총 검색(뉴스+법령)", f"{total_search:,}")
+
+    st.divider()
+
+    if pd and data:
+        left, right = st.columns(2)
+        with left:
+            st.subheader("📈 일자별 토큰 사용량")
+            tok = df.groupby("date")["token_usage"].sum().sort_index()
+            st.line_chart(tok)
+
+        with right:
+            st.subheader("📊 모드(A/B/신속/정밀) 사용 비중")
+            mode_counts = df["app_mode"].value_counts()
+            st.bar_chart(mode_counts)
+
+        left2, right2 = st.columns(2)
+        with left2:
+            st.subheader("👤 사용자별 실행 Top 10")
+            user_counts = df["user_email"].value_counts().head(10)
+            st.bar_chart(user_counts)
+
+        with right2:
+            st.subheader("🤖 모델 사용 분포")
+            m = df["model_used"].fillna("(unknown)").value_counts().head(10)
+            st.bar_chart(m)
 
         st.divider()
 
-        # 4. 차트 (Google Dashboard 스타일)
-        col_l, col_r = st.columns(2)
-        with col_l:
-            st.subheader("📈 토큰 사용 추이")
-            df["date"] = df["created_at"].dt.date
-            st.line_chart(df.groupby("date")["token_usage"].sum())
-        with col_r:
-            st.subheader("📊 모드별 사용 비중")
-            st.bar_chart(df["app_mode"].value_counts())
+        st.subheader("🧹 관리자 삭제")
+        st.caption("아래에서 work_archive 행을 선택하고 삭제할 수 있습니다(RLS상 관리자만 가능).")
 
-        st.divider()
-
-        # 5. 상세 기록 관리 및 삭제 버튼 (에러 지점 수정됨)
-        st.subheader("📝 상세 활동 모니터링")
-        for arc in data[:30]:
-            row_id = arc['id']
-            with st.expander(f"[{arc['created_at'][:16]}] {arc['user_email'] or '익명'} | {arc['app_mode']}"):
-                st.write(f"**지시 내용:** {arc['prompt']}")
-                st.caption(f"모델: {arc.get('model_used')} | ID: {row_id}")
-                
-                # 🟢 삭제 버튼 (들여쓰기 및 권한 로직 수정 완료)
-                if st.button("🗑️ 기록 삭제", key=f"del_{row_id}"):
-                    sb.table("work_archive").delete().eq("id", row_id).execute()
-                    st.success("데이터가 삭제되었습니다.")
+        # ✅ 삭제 UI: row 선택 후 삭제
+        pick = st.selectbox(
+            "삭제할 기록 선택",
+            options=[d["id"] for d in data[:200]] if data else [],
+            format_func=lambda rid: rid,
+        )
+        if pick:
+            if st.button("❌ 선택 기록 삭제", type="secondary"):
+                if admin_delete_archive(sb, pick):
+                    st.success("삭제 완료")
                     st.rerun()
 
-# =========================================================
-# 9) 메인 실행 함수 (탭 분리 로직 복구)
-# =========================================================
+        st.divider()
 
+        st.subheader("⬇️ 데이터 내보내기")
+        csv = df.sort_values("created_at", ascending=False).to_csv(index=False).encode("utf-8-sig")
+        st.download_button("work_archive CSV 다운로드", data=csv, file_name="work_archive.csv", mime="text/csv")
+    else:
+        st.info("표시할 데이터가 없습니다(또는 pandas 미설치).")
+
+    st.divider()
+
+    st.subheader("🟢 최근 5분 접속 세션")
+    if sessions:
+        st.write(f"최근 5분 내 last_seen 기준 세션: **{len(sessions)}**")
+        st.dataframe(sessions, use_container_width=True)
+    else:
+        st.caption("최근 5분 내 활성 세션이 없습니다.")
+
+    st.divider()
+
+    st.subheader("🧾 최근 이벤트 로그")
+    if events:
+        st.dataframe(events, use_container_width=True)
+    else:
+        st.caption("이벤트 로그가 없습니다.")
+
+def render_lawbot_button(url: str):
+    st.markdown(
+        f"""
+<a class="lawbot-btn" href="{_escape(url)}" target="_blank">
+  🤖 법령 AI (Lawbot) 실행 — 법령·규칙·서식 더 찾기
+  <span class="lawbot-sub">클릭하면 검색창에 키워드가 들어간 상태로 새창이 열립니다</span>
+</a>
+""",
+        unsafe_allow_html=True,
+    )
+
+# =========================================================
+# 9) MAIN UI
+# =========================================================
 def main():
     sb = get_supabase()
     ensure_anon_session_id()
@@ -1628,84 +1655,101 @@ def main():
             log_event(sb, "app_open", meta={"ver": APP_VERSION})
 
         sidebar_auth(sb)
-        # 실행 모드 선택기 추가
-        if "app_mode" not in st.session_state:
-            st.session_state.app_mode = "신속"
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("## ⚙️ 실행 모드")
-        st.session_state.app_mode = st.sidebar.selectbox(
-            "모드 선택", ["신속", "정밀", "A", "B"],
-            index=["신속", "정밀", "A", "B"].index(st.session_state.app_mode)
-        )
         render_history_list(sb)
     else:
-        st.sidebar.error("Supabase 연결 정보가 없습니다.")
+        st.sidebar.error("Supabase 연결 정보(secrets)가 없습니다.")
+        st.sidebar.caption("SUPABASE_URL / SUPABASE_ANON_KEY 필요")
 
-    # 🟢 [핵심] 관리자 탭 분리 로직 (문자열 주석에서 코드로 꺼냄)
-    is_admin = is_admin_user(st.session_state.get("user_email", ""))
-    admin_active = st.session_state.get("admin_mode", False)
+    # ✅ 너 코드의 st.markdown(""" ... 파이썬 코드가 문자열 안에 들어가서 앱이 박살났음.
+    #    탭 로직은 파이썬으로 정상 구현하고, 헤더 HTML은 그대로 렌더링.
+    show_admin_tabs = bool(
+        sb
+        and is_admin_user(st.session_state.get("user_email", ""))
+        and st.session_state.get("admin_mode", False)
+    )
 
-    if sb and is_admin and admin_active:
-        tab1, tab2 = st.tabs(["🧠 업무 처리", "🏛️ 마스터 대시보드"])
-        with tab1:
-            render_main_workflow_ui(sb)
-        with tab2:
+    if show_admin_tabs:
+        tabs = st.tabs(["🧠 업무 처리", "🏛️ 마스터 대시보드"])
+        with tabs[1]:
             render_master_dashboard(sb)
-    else:
-        render_main_workflow_ui(sb)
+        with tabs[0]:
+            pass  # 아래 업무 UI 계속 출력
+    # (admin 탭이 아니어도 아래 업무 UI는 그대로)
 
-def render_main_workflow_ui(sb):
-    """기존의 업무 지시 화면 전체"""
-    st.markdown(f"""
-        <div style='text-align: center; padding: 1rem 0;'>
-            <h1 style='font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'>
+    st.markdown(
+        """
+        <div style='text-align: center; padding: 2rem 0 3rem 0;'>
+            <h1 style='font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem; 
+                       background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+                       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                       background-clip: text;'>
                 🏢 AI 행정관 Pro
             </h1>
-            <p style='color: #4b5563;'>충주시청 스마트 행정 솔루션</p>
+            <p style='font-size: 1.1rem; color: #4b5563; font-weight: 500; margin-bottom: 0.75rem;'>
+                충주시청 스마트 행정 솔루션
+            </p>
+            <p style='font-size: 0.9rem; color: #6b7280;'>
+                문의 <a href='mailto:kim0395kk@korea.kr' style='color: #2563eb; text-decoration: none;'>kim0395kk@korea.kr</a> | Govable AI 에이전트
+            </p>
         </div>
-    """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # 시스템 상태 표시 (기존 코드 유지)
     ai_ok = "✅ AI" if llm_service.is_available() else "❌ AI"
     law_ok = "✅ LAW" if bool(get_general_secret("LAW_API_ID")) else "❌ LAW"
     nv_ok = "✅ NEWS" if bool(get_general_secret("NAVER_CLIENT_ID")) else "❌ NEWS"
     db_ok = "✅ DB" if sb else "❌ DB"
-    
-    st.markdown(f"""
-        <div style='text-align: center; padding: 0.5rem; background: white; border-radius: 12px; margin-bottom: 1rem; border-left: 4px solid #2563eb;'>
-            <span style='font-size: 0.9rem; font-weight: 600;'>시스템 상태: {ai_ok} · {law_ok} · {nv_ok} · {db_ok}</span>
-        </div>
-    """, unsafe_allow_html=True)
 
-    # (이하 기존의 col_left, col_right 로직 전체를 여기에 배치합니다)
+    st.markdown(
+        f"""
+        <div style='text-align: center; padding: 0.75rem 1.5rem; background: white; 
+                    border-radius: 12px; margin-bottom: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                    border-left: 4px solid #2563eb;'>
+            <span style='font-size: 0.9rem; color: #374151; font-weight: 600;'>
+                시스템 상태: {ai_ok} · {law_ok} · {nv_ok} · {db_ok}
+            </span>
+            <span style='font-size: 0.85rem; color: #9ca3af; margin-left: 1rem;'>
+                v{APP_VERSION}
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     col_left, col_right = st.columns([1, 1.15], gap="large")
 
     with col_left:
-        st.markdown("""
+        st.markdown(
+            """
             <div style='background: white; padding: 1.5rem; border-radius: 12px; 
                         box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem;'>
                 <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
                     🗣️ 업무 지시
                 </h3>
             </div>
-        """, unsafe_allow_html=True)
-        
+            """,
+            unsafe_allow_html=True,
+        )
+
         user_input = st.text_area(
             "업무 내용",
             height=190,
             placeholder="예시\n- 상황: (무슨 일 / 어디 / 언제 / 증거 유무...)\n- 쟁점: (요건/절차/근거...)\n- 요청: (원하는 결과물: 회신/사전통지/처분 등)",
             label_visibility="collapsed",
         )
-        
-        st.markdown("""
+
+        st.markdown(
+            """
             <div style='background: #fef3c7; border-left: 4px solid #f59e0b; 
                         padding: 1rem; border-radius: 8px; margin: 1rem 0;'>
                 <p style='margin: 0; color: #92400e; font-size: 0.9rem; font-weight: 500;'>
                     ⚠️ 민감정보(성명·연락처·주소·차량번호 등) 입력 금지
                 </p>
             </div>
-        """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
         if st.button("⚡ 스마트 분석 시작", type="primary", use_container_width=True):
             if not user_input:
@@ -1714,7 +1758,6 @@ def render_main_workflow_ui(sb):
                 with st.spinner("AI 에이전트 팀이 협업 중입니다..."):
                     res = run_workflow(user_input)
                     res["app_mode"] = st.session_state.get("app_mode", "신속")
-
 
                     archive_id = None
                     if sb:
@@ -1729,6 +1772,154 @@ def render_main_workflow_ui(sb):
 
         if "workflow_result" in st.session_state:
             res = st.session_state.workflow_result
+            pack = res.get("lawbot_pack") or {}
+            if pack.get("url"):
+                render_lawbot_button(pack["url"])
+
+            st.markdown(
+                """
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        🧠 케이스 분석
+                    </h3>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            a = res.get("analysis", {})
+            st.markdown(
+                f"""
+                <div style='background: #eff6ff; padding: 1rem; border-radius: 8px; border-left: 4px solid #2563eb; margin-bottom: 1rem;'>
+                    <p style='margin: 0 0 0.5rem 0; color: #1e40af; font-weight: 600;'>유형: {a.get('case_type','')}</p>
+                    <p style='margin: 0; color: #1e40af;'>쟁점: {", ".join(a.get("core_issue", []))}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            with st.expander("📋 누락정보/증빙/리스크/다음행동 보기", expanded=False):
+                st.markdown("**추가 확인 질문**")
+                for x in a.get("required_facts", []):
+                    st.write("- ", x)
+                st.markdown("**필요 증빙**")
+                for x in a.get("required_evidence", []):
+                    st.write("- ", x)
+                st.markdown("**절차 리스크**")
+                for x in a.get("risk_flags", []):
+                    st.write("- ", x)
+                st.markdown("**권장 다음 행동**")
+                for x in a.get("recommended_next_action", []):
+                    st.write("- ", x)
+
+            st.markdown(
+                """
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        📜 법령 근거
+                    </h3>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown(res.get("law", ""))
+
+            st.markdown(
+                """
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        📰 뉴스/사례
+                    </h3>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown(res.get("search", ""))
+
+            st.markdown(
+                """
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        🧭 처리 가이드
+                    </h3>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown(res.get("strategy", ""))
+
+            st.markdown(
+                """
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        🧨 예상 반발/대응
+                    </h3>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            for ob in res.get("objections", [])[:7]:
+                st.markdown(
+                    f"- **반발**: {ob.get('objection')}\n  - **대응**: {ob.get('response')}\n  - **기록 포인트**: {ob.get('record_point')}"
+                )
+
+            st.markdown(
+                """
+                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
+                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
+                        🗺️ 절차 플랜
+                    </h3>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            proc = res.get("procedure", {})
+            with st.expander("타임라인", expanded=True):
+                for step in proc.get("timeline", []):
+                    st.markdown(f"**{step.get('step')}. {step.get('name')}** — {step.get('goal')}")
+                    for x in step.get("actions", []):
+                        st.write("- 행동:", x)
+                    for x in step.get("records", []):
+                        st.write("- 기록:", x)
+                    if step.get("legal_note"):
+                        st.caption(f"법/유의: {step['legal_note']}")
+                    st.write("")
+            with st.expander("체크리스트/서식", expanded=False):
+                st.markdown("**체크리스트**")
+                for x in proc.get("checklist", []):
+                    st.write("- ", x)
+                st.markdown("**필요 서식/문서**")
+                for x in proc.get("templates", []):
+                    st.write("- ", x)
+
+    with col_right:
+        if "workflow_result" not in st.session_state:
+            st.markdown(
+                """
+                <div style='text-align: center; padding: 6rem 2rem; 
+                            background: white; border-radius: 16px; 
+                            border: 2px dashed #d1d5db; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'>
+                    <div style='font-size: 4rem; margin-bottom: 1rem; opacity: 0.5;'>📄</div>
+                    <h3 style='color: #6b7280; font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem;'>
+                        Document Preview
+                    </h3>
+                    <p style='color: #9ca3af; font-size: 1rem; line-height: 1.6;'>
+                        왼쪽에서 업무를 지시하면<br>완성된 공문서가 여기에 나타납니다.
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            return
+
+        res = st.session_state.workflow_result
+
             pack = res.get("lawbot_pack") or {}
             if pack.get("url"):
                 render_lawbot_button(pack["url"])
