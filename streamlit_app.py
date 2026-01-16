@@ -521,22 +521,30 @@ section[data-testid="stSidebar"]{
 )
 st.markdown("""
     <style>
-        /* 1. 헤더 그릇 자체는 보이게 둡니다 (이걸 숨기면 왼쪽 버튼도 같이 사라짐) */
-        header {
+        /* [중요] 1. 헤더(Header) 컨테이너 자체는 보이게 둡니다. */
+        /* 이걸 숨기면 왼쪽 버튼이 살 공간이 사라집니다. */
+        header[data-testid="stHeader"] {
             visibility: visible !important;
+            background: transparent !important; /* 배경만 투명하게 */
         }
 
-        /* 2. '오른쪽 툴바'만 콕 집어서 숨깁니다 (Share, GitHub, 점 3개 등) */
+        /* 2. 현재 문제인 '오른쪽 툴바(메뉴)'만 콕 집어서 삭제합니다. */
         [data-testid="stToolbar"] {
             visibility: hidden !important;
-            display: none !important; /* 공간도 차지하지 않게 아예 삭제 */
+            display: none !important;
         }
 
-        /* 3. (안전장치) 혹시라도 영향받을까 봐 '왼쪽 사이드바 버튼'은 강제로 보이게 함 */
+        /* 3. (안전장치) 왼쪽 사이드바 여는 버튼(Chevron)은 확실하게 보이게 강제합니다. */
         [data-testid="stSidebarCollapsedControl"] {
             visibility: visible !important;
             display: block !important;
-            z-index: 999999 !important; /* 제일 위로 올림 */
+            color: black !important; /* 버튼 색상이 배경색과 같아 안 보일 경우 대비 */
+        }
+        
+        /* 4. (선택사항) 상단의 무지개색 줄(Decoration)도 거슬리면 숨김 */
+        [data-testid="stDecoration"] {
+            visibility: hidden !important;
+            display: none !important;
         }
     </style>
 """, unsafe_allow_html=True)
