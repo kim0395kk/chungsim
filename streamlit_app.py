@@ -519,55 +519,7 @@ section[data-testid="stSidebar"]{
 """,
     unsafe_allow_html=True,
 )
-import streamlit as st
 
-# 1. 페이지 설정: 사이드바를 일단 열고 시작 (버튼이 없어도 사이드바는 보이게)
-st.set_page_config(
-    layout="wide",
-    page_title="AI 행정관 Pro",
-    page_icon="⚖️",
-    initial_sidebar_state="expanded"
-)
-
-# 2. CSS 스타일 적용
-st.markdown("""
-    <style>
-        /* [1] 헤더 배경 투명화 */
-        /* 헤더 박스는 그대로 두고 배경색만 없앱니다. */
-        header[data-testid="stHeader"] {
-            background: transparent !important;
-        }
-
-        /* [2] 오른쪽 메뉴들 (툴바, 데코레이션) 아예 삭제 */
-        /* display: none으로 깔끔하게 지웁니다. */
-        [data-testid="stToolbar"], 
-        [data-testid="stHeaderActionElements"], 
-        [data-testid="stDecoration"] {
-            display: none !important;
-        }
-
-        /* [3] 왼쪽 사이드바 여는 버튼 (Chevron) 복구 */
-        /* 위치를 강제로 옮기지 않습니다(fixed 금지). 원래 흐름대로 둡니다. */
-        [data-testid="stSidebarCollapsedControl"] {
-            display: block !important;
-            visibility: visible !important;
-            color: #000000 !important; /* 검은색 강제 */
-            z-index: 999999 !important; /* 맨 앞으로 */
-        }
-        
-        /* [4] 버튼 아이콘 색상 강제 (이게 핵심일 수 있습니다) */
-        [data-testid="stSidebarCollapsedControl"] svg {
-            fill: #000000 !important;
-            stroke: #000000 !important;
-        }
-        
-        /* [5] 혹시 버튼이 너무 작게 찌그러졌을까봐 크기 지정 */
-        [data-testid="stSidebarCollapsedControl"] button {
-            width: auto !important;
-            height: auto !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
 # ====== LAST: sidebar toggle rescue (must be the last CSS injected) ======
 st.markdown("""
 <style>
