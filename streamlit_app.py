@@ -485,7 +485,6 @@ st.markdown(
     /* ====================== */
     header [data-testid="stToolbar"] { display: none !important; }
     header [data-testid="stDecoration"] { display: none !important; }
-    header { height: 0px !important; }
     footer { display: none !important; }
     div[data-testid="stStatusWidget"] { display: none !important; }
     /* --- SAFETY: sidebar toggle & sidebar must stay visible --- */
