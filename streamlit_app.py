@@ -519,22 +519,25 @@ section[data-testid="stSidebar"]{
 """,
     unsafe_allow_html=True,
 )
-# ==========================================
-# 상단 우측 메뉴(툴바) 숨기기
-# ==========================================
 st.markdown("""
     <style>
-        /* 상단 우측의 툴바(Share, GitHub, 메뉴 등)만 숨김 */
-        [data-testid="stToolbar"] {
-            visibility: hidden;
-            height: 0%;
+        /* 1. 헤더 그릇 자체는 보이게 둡니다 (이걸 숨기면 왼쪽 버튼도 같이 사라짐) */
+        header {
+            visibility: visible !important;
         }
 
-        /* (선택사항) 상단에 얇은 컬러 라인(데코레이션)도 숨기려면 아래 주석 해제 */
-        /* [data-testid="stDecoration"] { visibility: hidden; } */
-        
-        /* (선택사항) 하단 'Made with Streamlit' 푸터 숨기기 */
-        footer { visibility: hidden; }
+        /* 2. '오른쪽 툴바'만 콕 집어서 숨깁니다 (Share, GitHub, 점 3개 등) */
+        [data-testid="stToolbar"] {
+            visibility: hidden !important;
+            display: none !important; /* 공간도 차지하지 않게 아예 삭제 */
+        }
+
+        /* 3. (안전장치) 혹시라도 영향받을까 봐 '왼쪽 사이드바 버튼'은 강제로 보이게 함 */
+        [data-testid="stSidebarCollapsedControl"] {
+            visibility: visible !important;
+            display: block !important;
+            z-index: 999999 !important; /* 제일 위로 올림 */
+        }
     </style>
 """, unsafe_allow_html=True)
 
