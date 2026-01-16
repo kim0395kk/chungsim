@@ -520,6 +520,38 @@ section[data-testid="stSidebar"]{
     unsafe_allow_html=True,
 )
 
+# ====== LAST: sidebar toggle rescue (must be the last CSS injected) ======
+st.markdown("""
+<style>
+/* 헤더가 0 높이/숨김이면 토글도 같이 사라짐 -> 최소 높이 보장 */
+header, header[data-testid="stHeader"]{
+  height: 3rem !important;
+  min-height: 3rem !important;
+  visibility: visible !important;
+  display: block !important;
+}
+
+/* Streamlit 버전에 따라 토글 testid가 바뀜 -> 둘 다 살림 */
+div[data-testid="stSidebarCollapsedControl"],
+div[data-testid="collapsedControl"]{
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+
+  position: fixed !important;
+  top: 10px !important;
+  left: 10px !important;
+  z-index: 999999 !important;
+}
+
+/* 사이드바 컨테이너도 강제로 표시 */
+section[data-testid="stSidebar"]{
+  display: block !important;
+  visibility: visible !important;
+}
+</style>
+""", unsafe_allow_html=True)
 # =========================================================
 # 3) SERVICES
 # =========================================================
