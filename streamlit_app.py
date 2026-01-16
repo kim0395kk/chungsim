@@ -521,43 +521,43 @@ section[data-testid="stSidebar"]{
 )
 import streamlit as st
 
-# 1. 페이지 설정 (사이드바가 열린 상태로 시작하게 함)
+# 1. 페이지 설정 (가장 먼저 실행)
 st.set_page_config(
     layout="wide",
     page_title="AI 행정관 Pro - Govable AI",
     page_icon="⚖️",
-    initial_sidebar_state="expanded" 
+    initial_sidebar_state="expanded"
 )
 
-# 2. 강력한 CSS 적용
+# 2. CSS 적용 (기존 스타일 코드 모두 지우고 이것만 넣으세요)
 st.markdown("""
     <style>
-        /* 1. [초기화] 헤더 영역을 강제로 보이게 하고, 배경만 투명하게 만듭니다 */
+        /* [1] 헤더 영역 초기화: 일단 다 보이게 하고 배경만 투명하게 */
         header[data-testid="stHeader"] {
             visibility: visible !important;
             background: transparent !important;
         }
 
-        /* 2. [핵심] 오른쪽 툴바와 메뉴를 '삭제'하지 않고 '투명'하게 만듭니다. */
-        /* display: none을 쓰면 자리가 없어져서 왼쪽 버튼도 같이 사라지므로, */
-        /* 자리는 차지하되 눈에만 안 보이게(visibility: hidden) 처리합니다. */
+        /* [2] 오른쪽 요소들(툴바, 점3개 메뉴, 장식줄) 투명화 */
+        /* display: none을 쓰면 자리가 없어져 레이아웃이 깨지므로 */
+        /* 자리는 차지하되 눈에만 안 보이게(hidden) 처리합니다. */
         [data-testid="stToolbar"], 
         [data-testid="stHeaderActionElements"], 
         [data-testid="stDecoration"] {
             visibility: hidden !important;
-            pointer-events: none !important; /* 투명한 곳을 클릭해도 반응 없게 */
+            pointer-events: none !important; /* 클릭도 안 되게 막음 */
         }
 
-        /* 3. [안전장치] 왼쪽 사이드바 버튼은 '보임' 상태 유지 */
-        /* 위치를 강제로 옮기지 않습니다(position: fixed 금지). 원래 자리에 있게 둡니다. */
+        /* [3] 왼쪽 사이드바 버튼 복구 */
+        /* 위치를 강제로 옮기지 않고(fixed 금지) 원래 자리에 둡니다. */
         [data-testid="stSidebarCollapsedControl"] {
             visibility: visible !important;
             display: block !important;
         }
         
-        /* 4. [색상 보정] 혹시 버튼이 흰색이라 안 보일까 봐 아이콘을 진한 회색으로 칠합니다 */
+        /* [4] 색상 강제 지정 (혹시 버튼이 흰색이라 안 보일까 봐) */
         [data-testid="stSidebarCollapsedControl"] svg {
-            fill: #31333F !important; /* 스트림릿 기본 회색 */
+            fill: #31333F !important; /* 진한 회색 (기본색) */
             stroke: #31333F !important;
         }
     </style>
