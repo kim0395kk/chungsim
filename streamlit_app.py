@@ -137,11 +137,7 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
 # =========================================================
 # 2) STYLES  (✅ 여기 CSS/디자인은 네가 준 그대로. 변경 없음)
 # =========================================================
-st.set_page_config(layout="wide",
-    page_title="AI 행정관 Pro - Govable AI",
-    page_icon="⚖️",
-    initial_sidebar_state="expanded"  # ✅ 사이드바 강제 펼침
-)
+st.set_page_config(layout="wide", page_title="AI Bureau: The Legal Glass", page_icon="⚖️")
 st.markdown(
     """
 <style>
@@ -157,7 +153,7 @@ st.markdown(
         --primary-600: #2563eb;
         --primary-700: #1d4ed8;
         --primary-800: #1e40af;
-
+        
         /* Colors - Neutral Palette */
         --neutral-50: #f9fafb;
         --neutral-100: #f3f4f6;
@@ -169,14 +165,14 @@ st.markdown(
         --neutral-700: #374151;
         --neutral-800: #1f2937;
         --neutral-900: #111827;
-
+        
         /* Colors - Semantic */
         --success-500: #10b981;
         --success-600: #059669;
         --warning-500: #f59e0b;
         --error-500: #ef4444;
         --error-600: #dc2626;
-
+        
         /* Spacing */
         --space-xs: 0.25rem;
         --space-sm: 0.5rem;
@@ -184,33 +180,33 @@ st.markdown(
         --space-lg: 1.5rem;
         --space-xl: 2rem;
         --space-2xl: 3rem;
-
+        
         /* Border Radius */
         --radius-sm: 0.375rem;
         --radius-md: 0.5rem;
         --radius-lg: 0.75rem;
         --radius-xl: 1rem;
-
+        
         /* Shadows */
         --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
         --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-
+        
         /* Typography */
         --font-serif: 'Batang', 'Nanum Myeongjo', serif;
         --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
     }
-
+    
     /* ====================== */
     /* Base Styles */
     /* ====================== */
-    .stApp {
+    .stApp { 
         background: linear-gradient(135deg, var(--neutral-50) 0%, var(--primary-50) 100%);
         font-family: var(--font-sans);
     }
-
+    
     /* ====================== */
     /* Document Paper Style */
     /* ====================== */
@@ -229,21 +225,21 @@ st.markdown(
         border-radius: var(--radius-sm);
     }
 
-    .doc-header {
-        text-align: center;
-        font-size: 24pt;
-        font-weight: 900;
-        margin-bottom: var(--space-2xl);
+    .doc-header { 
+        text-align: center; 
+        font-size: 24pt; 
+        font-weight: 900; 
+        margin-bottom: var(--space-2xl); 
         letter-spacing: 3px;
         color: var(--neutral-900);
         padding-bottom: var(--space-lg);
         border-bottom: 3px double var(--neutral-800);
     }
-
-    .doc-info {
-        display: flex;
-        justify-content: space-between;
-        font-size: 11pt;
+    
+    .doc-info { 
+        display: flex; 
+        justify-content: space-between; 
+        font-size: 11pt; 
         background: var(--neutral-50);
         padding: var(--space-lg);
         border-radius: var(--radius-md);
@@ -252,39 +248,39 @@ st.markdown(
         flex-wrap: wrap;
         border-left: 4px solid var(--primary-600);
     }
-
+    
     .doc-info span {
         font-weight: 600;
         color: var(--neutral-700);
     }
-
-    .doc-body {
-        font-size: 12pt;
-        text-align: justify;
+    
+    .doc-body { 
+        font-size: 12pt; 
+        text-align: justify; 
         white-space: normal;
         color: var(--neutral-800);
     }
-
-    .doc-footer {
-        text-align: center;
-        font-size: 22pt;
-        font-weight: bold;
-        margin-top: 100px;
+    
+    .doc-footer { 
+        text-align: center; 
+        font-size: 22pt; 
+        font-weight: bold; 
+        margin-top: 100px; 
         letter-spacing: 6px;
         color: var(--neutral-900);
     }
-
-    .stamp {
-        position: absolute;
-        bottom: 90px;
-        right: 85px;
-        border: 4px solid var(--error-600);
-        color: var(--error-600);
-        padding: var(--space-sm) var(--space-md);
-        font-size: 15pt;
-        font-weight: 900;
-        transform: rotate(-15deg);
-        opacity: 0.85;
+    
+    .stamp { 
+        position: absolute; 
+        bottom: 90px; 
+        right: 85px; 
+        border: 4px solid var(--error-600); 
+        color: var(--error-600); 
+        padding: var(--space-sm) var(--space-md); 
+        font-size: 15pt; 
+        font-weight: 900; 
+        transform: rotate(-15deg); 
+        opacity: 0.85; 
         border-radius: var(--radius-md);
         background: rgba(220, 38, 38, 0.05);
     }
@@ -308,19 +304,19 @@ st.markdown(
         transition: all 0.2s ease;
         font-size: 1rem;
     }
-
-    .lawbot-btn:hover {
+    
+    .lawbot-btn:hover { 
         transform: translateY(-2px);
         box-shadow: var(--shadow-xl);
         filter: brightness(1.05);
     }
-
-    .lawbot-sub {
-        font-size: 0.8rem;
-        opacity: 0.9;
-        margin-top: var(--space-sm);
-        display: block;
-        color: rgba(255,255,255,0.95) !important;
+    
+    .lawbot-sub { 
+        font-size: 0.8rem; 
+        opacity: 0.9; 
+        margin-top: var(--space-sm); 
+        display: block; 
+        color: rgba(255,255,255,0.95) !important; 
         font-weight: 500;
         letter-spacing: 0.2px;
     }
@@ -331,9 +327,8 @@ st.markdown(
     div[data-testid="stSidebar"] {
         background: white;
         border-right: 1px solid var(--neutral-200);
-        z-index: 999998 !important; /* 다른 레이어에 밀려 안 보이는 현상 방지 */
     }
-
+    
     div[data-testid="stSidebar"] button[kind="secondary"] {
         width: 100%;
         text-align: left !important;
@@ -347,117 +342,11 @@ st.markdown(
         transition: all 0.2s ease !important;
         margin-bottom: var(--space-xs) !important;
     }
-
-    div[data-testid="stSidebar"] button[kind="secondary"]:hover {
+    
+    div[data-testid="stSidebar"] button[kind="secondary"]:hover { 
         background: var(--neutral-50) !important;
         border-color: var(--primary-300) !important;
         transform: translateX(2px);
-    }
-
-/* ====================== */
-    /* [수정 2차] 헤더 및 사이드바 버튼 강제 복구 */
-    /* ====================== */
-
-    /* 1. 헤더 영역 전체 초기화 (숨김 해제) */
-    header {
-        background: transparent !important;
-        visibility: visible !important;
-        height: auto !important;
-        /* 버튼이 헤더 뒤로 숨지 않도록 z-index 설정 */
-        z-index: 100 !important; 
-    }
-
-    /* 2. 툴바(우측 메뉴)는 숨기되, "공간"은 유지하여 버튼 간섭 방지 */
-    header [data-testid="stToolbar"] {
-        opacity: 1 !important; /* 투명도 복구 */
-        background: transparent !important;
-        pointer-events: auto !important; /* 클릭 가능하도록 복구 */
-        right: 2rem; /* 우측으로 좀 더 밀어넣기 */
-    }
-
-    /* 3. 장식용 컬러 라인(데코레이션)만 숨김 */
-    header [data-testid="stDecoration"] {
-        display: none !important;
-    }
-
-    /* 4. 사이드바 토글 버튼 (가장 강력한 선택자 사용) */
-    /* 버튼이 어디에 있든 화면 좌측 상단에 고정 */
-    button[data-testid="stSidebarCollapsedControl"],
-    button[data-testid="stSidebarCollapseButton"],
-    [data-testid="stHeader"] button[title="Expand sidebar"],
-    [data-testid="stHeader"] button[title="Collapse sidebar"] {
-        
-        /* 위치 및 크기 강제 지정 */
-        display: block !important;
-        position: fixed !important;
-        top: 1rem !important;
-        left: 1rem !important;
-        z-index: 999999 !important; /* 최상위 레이어 */
-        
-        /* 디자인 스타일링 */
-        width: 3rem !important;
-        height: 3rem !important;
-        background: linear-gradient(135deg, #fff7ed 0%, #eff6ff 100%) !important;
-        border: 3px solid #f59e0b !important; /* 주황색 테두리 */
-        border-radius: 50% !important; /* 원형으로 변경 */
-        box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3) !important;
-        
-        /* 텍스트/아이콘 색상 */
-        color: #111827 !important;
-        
-        /* 애니메이션 */
-        transition: all 0.3s ease !important;
-    }
-
-    /* 버튼 호버 효과 */
-    button[data-testid="stSidebarCollapsedControl"]:hover,
-    button[data-testid="stSidebarCollapseButton"]:hover,
-    [data-testid="stHeader"] button[title="Expand sidebar"]:hover,
-    [data-testid="stHeader"] button[title="Collapse sidebar"]:hover {
-        transform: scale(1.1) rotate(90deg); /* 회전 효과 추가 */
-        background: #fff !important;
-        border-color: #d97706 !important;
-        box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2) !important;
-    }
-
-    /* 아이콘(SVG) 크기 및 색상 강제 */
-    button[data-testid="stSidebarCollapsedControl"] svg,
-    button[data-testid="stSidebarCollapseButton"] svg {
-        width: 1.5rem !important;
-        height: 1.5rem !important;
-        fill: #111827 !important;
-        stroke: #111827 !important;
-    }
-    /* 호버 효과 */
-    [data-testid="stSidebarCollapsedControl"]:hover,
-    [data-testid="stSidebarCollapseButton"]:hover,
-    [data-testid="stSidebarNav"] > button:hover,
-    header [data-testid="baseButton-header"]:hover {
-        transform: scale(1.06);
-        box-shadow: 0 0 0 14px rgba(245, 158, 11, 0.22), var(--shadow-xl) !important;
-        background: white !important; /* 호버 시 배경 밝게 */
-    }
-
-    /* 애니메이션 정의 (기존 유지) */
-    @keyframes sidebarPulse {
-        0% {
-            transform: scale(1);
-            box-shadow: 0 0 0 10px rgba(245,158,11,0.20), var(--shadow-lg);
-        }
-        50% {
-            transform: scale(1.07);
-            box-shadow: 0 0 0 18px rgba(245,158,11,0.14), var(--shadow-xl);
-        }
-        100% {
-            transform: scale(1);
-            box-shadow: 0 0 0 10px rgba(245,158,11,0.20), var(--shadow-lg);
-        }
-    }
-
-    /* 애니메이션 적용 */
-    [data-testid="stSidebarCollapsedControl"],
-    [data-testid="stSidebarCollapseButton"] {
-        animation: sidebarPulse 1.15s infinite;
     }
 
     /* ====================== */
@@ -471,13 +360,13 @@ st.markdown(
         font-family: var(--font-sans) !important;
         transition: all 0.2s ease !important;
     }
-
+    
     .stTextInput > div > div > input:focus,
     .stTextArea > div > div > textarea:focus {
         border-color: var(--primary-500) !important;
         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
     }
-
+    
     /* ====================== */
     /* Buttons */
     /* ====================== */
@@ -488,13 +377,13 @@ st.markdown(
         transition: all 0.2s ease !important;
         border: none !important;
     }
-
+    
     .stButton > button[kind="primary"] {
         background: linear-gradient(135deg, var(--primary-600) 0%, var(--primary-700) 100%) !important;
         color: white !important;
         box-shadow: var(--shadow-md) !important;
     }
-
+    
     .stButton > button[kind="primary"]:hover {
         transform: translateY(-1px) !important;
         box-shadow: var(--shadow-lg) !important;
@@ -510,7 +399,7 @@ st.markdown(
         font-weight: 600 !important;
         border: 1px solid var(--neutral-200) !important;
     }
-
+    
     /* ====================== */
     /* Info/Warning Boxes */
     /* ====================== */
@@ -519,7 +408,7 @@ st.markdown(
         border: none !important;
         padding: var(--space-lg) !important;
     }
-
+    
     /* ====================== */
     /* Chat Messages */
     /* ====================== */
@@ -529,7 +418,7 @@ st.markdown(
         margin-bottom: var(--space-md) !important;
         box-shadow: var(--shadow-sm) !important;
     }
-
+    
     /* ====================== */
     /* Chat Input - Enhanced Visibility */
     /* ====================== */
@@ -542,7 +431,7 @@ st.markdown(
         margin-top: var(--space-lg) !important;
         position: relative !important;
     }
-
+    
     .stChatInputContainer::before {
         content: '💬 여기에 후속 질문을 입력하세요';
         position: absolute;
@@ -557,7 +446,7 @@ st.markdown(
         border: 2px solid var(--primary-200);
         box-shadow: var(--shadow-sm);
     }
-
+    
     .stChatInputContainer textarea {
         border: 2px solid var(--primary-300) !important;
         border-radius: var(--radius-lg) !important;
@@ -566,13 +455,13 @@ st.markdown(
         padding: var(--space-md) !important;
         transition: all 0.3s ease !important;
     }
-
+    
     .stChatInputContainer textarea:focus {
         border-color: var(--primary-600) !important;
         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
         transform: scale(1.01);
     }
-
+    
     .stChatInputContainer textarea::placeholder {
         color: var(--primary-400) !important;
         font-weight: 500 !important;
@@ -585,36 +474,23 @@ st.markdown(
         color: var(--neutral-900) !important;
         font-weight: 700 !important;
     }
-
+    
     h1 { font-size: 2.5rem !important; }
     h2 { font-size: 1.75rem !important; margin-top: var(--space-xl) !important; }
     h3 { font-size: 1.25rem !important; margin-top: var(--space-lg) !important; }
 
     /* ====================== */
-    /* Hide Default Elements (SAFE-ish) */
-    /*  - ❗header 높이를 고정/축소하지 말 것 (토글 잘림 방지) */
+    /* Hide Default Elements */
     /* ====================== */
+    header [data-testid="stToolbar"] { display: none !important; }
     header [data-testid="stDecoration"] { display: none !important; }
-
-    /* 툴바는 완전 제거 대신 “투명 + 클릭 불가”로 배치 유지 */
-    header [data-testid="stToolbar"] {
-        opacity: 0.12 !important;
-       
-    }
-
-    /* header 자체는 auto로 두고, 잘림 방지 */
-    header {
-        height: auto !important;
-        min-height: 3.25rem !important;
-        overflow: visible !important;
-    }
-
+    header { height: 0px !important; }
     footer { display: none !important; }
+    div[data-testid="stStatusWidget"] { display: none !important; }
 </style>
 """,
     unsafe_allow_html=True,
 )
-
 
 # =========================================================
 # 3) SERVICES
