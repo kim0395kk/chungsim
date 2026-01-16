@@ -137,7 +137,7 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
 # =========================================================
 # 2) STYLES  (✅ 여기 CSS/디자인은 네가 준 그대로. 변경 없음)
 # =========================================================
-st.set_page_config(layout="wide", page_title="AI Bureau: The Legal Glass", page_icon="⚖️")
+st.set_page_config(layout="wide", page_title="AI 행정관 Pro - Govable AI", page_icon="⚖️")
 st.markdown(
     """
 <style>
@@ -153,7 +153,7 @@ st.markdown(
         --primary-600: #2563eb;
         --primary-700: #1d4ed8;
         --primary-800: #1e40af;
-        
+
         /* Colors - Neutral Palette */
         --neutral-50: #f9fafb;
         --neutral-100: #f3f4f6;
@@ -165,14 +165,14 @@ st.markdown(
         --neutral-700: #374151;
         --neutral-800: #1f2937;
         --neutral-900: #111827;
-        
+
         /* Colors - Semantic */
         --success-500: #10b981;
         --success-600: #059669;
         --warning-500: #f59e0b;
         --error-500: #ef4444;
         --error-600: #dc2626;
-        
+
         /* Spacing */
         --space-xs: 0.25rem;
         --space-sm: 0.5rem;
@@ -180,33 +180,33 @@ st.markdown(
         --space-lg: 1.5rem;
         --space-xl: 2rem;
         --space-2xl: 3rem;
-        
+
         /* Border Radius */
         --radius-sm: 0.375rem;
         --radius-md: 0.5rem;
         --radius-lg: 0.75rem;
         --radius-xl: 1rem;
-        
+
         /* Shadows */
         --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
         --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-        
+
         /* Typography */
         --font-serif: 'Batang', 'Nanum Myeongjo', serif;
         --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
     }
-    
+
     /* ====================== */
     /* Base Styles */
     /* ====================== */
-    .stApp { 
+    .stApp {
         background: linear-gradient(135deg, var(--neutral-50) 0%, var(--primary-50) 100%);
         font-family: var(--font-sans);
     }
-    
+
     /* ====================== */
     /* Document Paper Style */
     /* ====================== */
@@ -225,21 +225,21 @@ st.markdown(
         border-radius: var(--radius-sm);
     }
 
-    .doc-header { 
-        text-align: center; 
-        font-size: 24pt; 
-        font-weight: 900; 
-        margin-bottom: var(--space-2xl); 
+    .doc-header {
+        text-align: center;
+        font-size: 24pt;
+        font-weight: 900;
+        margin-bottom: var(--space-2xl);
         letter-spacing: 3px;
         color: var(--neutral-900);
         padding-bottom: var(--space-lg);
         border-bottom: 3px double var(--neutral-800);
     }
-    
-    .doc-info { 
-        display: flex; 
-        justify-content: space-between; 
-        font-size: 11pt; 
+
+    .doc-info {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11pt;
         background: var(--neutral-50);
         padding: var(--space-lg);
         border-radius: var(--radius-md);
@@ -248,39 +248,39 @@ st.markdown(
         flex-wrap: wrap;
         border-left: 4px solid var(--primary-600);
     }
-    
+
     .doc-info span {
         font-weight: 600;
         color: var(--neutral-700);
     }
-    
-    .doc-body { 
-        font-size: 12pt; 
-        text-align: justify; 
+
+    .doc-body {
+        font-size: 12pt;
+        text-align: justify;
         white-space: normal;
         color: var(--neutral-800);
     }
-    
-    .doc-footer { 
-        text-align: center; 
-        font-size: 22pt; 
-        font-weight: bold; 
-        margin-top: 100px; 
+
+    .doc-footer {
+        text-align: center;
+        font-size: 22pt;
+        font-weight: bold;
+        margin-top: 100px;
         letter-spacing: 6px;
         color: var(--neutral-900);
     }
-    
-    .stamp { 
-        position: absolute; 
-        bottom: 90px; 
-        right: 85px; 
-        border: 4px solid var(--error-600); 
-        color: var(--error-600); 
-        padding: var(--space-sm) var(--space-md); 
-        font-size: 15pt; 
-        font-weight: 900; 
-        transform: rotate(-15deg); 
-        opacity: 0.85; 
+
+    .stamp {
+        position: absolute;
+        bottom: 90px;
+        right: 85px;
+        border: 4px solid var(--error-600);
+        color: var(--error-600);
+        padding: var(--space-sm) var(--space-md);
+        font-size: 15pt;
+        font-weight: 900;
+        transform: rotate(-15deg);
+        opacity: 0.85;
         border-radius: var(--radius-md);
         background: rgba(220, 38, 38, 0.05);
     }
@@ -304,19 +304,19 @@ st.markdown(
         transition: all 0.2s ease;
         font-size: 1rem;
     }
-    
-    .lawbot-btn:hover { 
+
+    .lawbot-btn:hover {
         transform: translateY(-2px);
         box-shadow: var(--shadow-xl);
         filter: brightness(1.05);
     }
-    
-    .lawbot-sub { 
-        font-size: 0.8rem; 
-        opacity: 0.9; 
-        margin-top: var(--space-sm); 
-        display: block; 
-        color: rgba(255,255,255,0.95) !important; 
+
+    .lawbot-sub {
+        font-size: 0.8rem;
+        opacity: 0.9;
+        margin-top: var(--space-sm);
+        display: block;
+        color: rgba(255,255,255,0.95) !important;
         font-weight: 500;
         letter-spacing: 0.2px;
     }
@@ -328,7 +328,7 @@ st.markdown(
         background: white;
         border-right: 1px solid var(--neutral-200);
     }
-    
+
     div[data-testid="stSidebar"] button[kind="secondary"] {
         width: 100%;
         text-align: left !important;
@@ -342,11 +342,48 @@ st.markdown(
         transition: all 0.2s ease !important;
         margin-bottom: var(--space-xs) !important;
     }
-    
-    div[data-testid="stSidebar"] button[kind="secondary"]:hover { 
+
+    div[data-testid="stSidebar"] button[kind="secondary"]:hover {
         background: var(--neutral-50) !important;
         border-color: var(--primary-300) !important;
         transform: translateX(2px);
+    }
+
+    /* ====================== */
+    /* Sidebar Toggle Button (Collapsed control) */
+    /* ====================== */
+    button[data-testid="stSidebarCollapsedControl"] {
+        border: 3px solid var(--warning-500) !important;
+        border-radius: var(--radius-xl) !important;
+        background: linear-gradient(135deg, #fff7ed 0%, var(--primary-50) 100%) !important;
+        box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.20), var(--shadow-lg) !important;
+        animation: sidebarPulse 1.15s infinite;
+        padding: 0.6rem 0.75rem !important;
+    }
+
+    button[data-testid="stSidebarCollapsedControl"] * {
+        color: var(--neutral-900) !important;
+        font-weight: 900 !important;
+    }
+
+    button[data-testid="stSidebarCollapsedControl"]:hover {
+        transform: scale(1.06);
+        box-shadow: 0 0 0 14px rgba(245, 158, 11, 0.22), var(--shadow-xl) !important;
+    }
+
+    @keyframes sidebarPulse {
+        0% {
+            transform: scale(1);
+            box-shadow: 0 0 0 10px rgba(245,158,11,0.20), var(--shadow-lg);
+        }
+        50% {
+            transform: scale(1.07);
+            box-shadow: 0 0 0 18px rgba(245,158,11,0.14), var(--shadow-xl);
+        }
+        100% {
+            transform: scale(1);
+            box-shadow: 0 0 0 10px rgba(245,158,11,0.20), var(--shadow-lg);
+        }
     }
 
     /* ====================== */
@@ -360,13 +397,13 @@ st.markdown(
         font-family: var(--font-sans) !important;
         transition: all 0.2s ease !important;
     }
-    
+
     .stTextInput > div > div > input:focus,
     .stTextArea > div > div > textarea:focus {
         border-color: var(--primary-500) !important;
         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
     }
-    
+
     /* ====================== */
     /* Buttons */
     /* ====================== */
@@ -377,13 +414,13 @@ st.markdown(
         transition: all 0.2s ease !important;
         border: none !important;
     }
-    
+
     .stButton > button[kind="primary"] {
         background: linear-gradient(135deg, var(--primary-600) 0%, var(--primary-700) 100%) !important;
         color: white !important;
         box-shadow: var(--shadow-md) !important;
     }
-    
+
     .stButton > button[kind="primary"]:hover {
         transform: translateY(-1px) !important;
         box-shadow: var(--shadow-lg) !important;
@@ -399,7 +436,7 @@ st.markdown(
         font-weight: 600 !important;
         border: 1px solid var(--neutral-200) !important;
     }
-    
+
     /* ====================== */
     /* Info/Warning Boxes */
     /* ====================== */
@@ -408,7 +445,7 @@ st.markdown(
         border: none !important;
         padding: var(--space-lg) !important;
     }
-    
+
     /* ====================== */
     /* Chat Messages */
     /* ====================== */
@@ -418,7 +455,7 @@ st.markdown(
         margin-bottom: var(--space-md) !important;
         box-shadow: var(--shadow-sm) !important;
     }
-    
+
     /* ====================== */
     /* Chat Input - Enhanced Visibility */
     /* ====================== */
@@ -431,7 +468,7 @@ st.markdown(
         margin-top: var(--space-lg) !important;
         position: relative !important;
     }
-    
+
     .stChatInputContainer::before {
         content: '💬 여기에 후속 질문을 입력하세요';
         position: absolute;
@@ -446,7 +483,7 @@ st.markdown(
         border: 2px solid var(--primary-200);
         box-shadow: var(--shadow-sm);
     }
-    
+
     .stChatInputContainer textarea {
         border: 2px solid var(--primary-300) !important;
         border-radius: var(--radius-lg) !important;
@@ -455,13 +492,13 @@ st.markdown(
         padding: var(--space-md) !important;
         transition: all 0.3s ease !important;
     }
-    
+
     .stChatInputContainer textarea:focus {
         border-color: var(--primary-600) !important;
         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
         transform: scale(1.01);
     }
-    
+
     .stChatInputContainer textarea::placeholder {
         color: var(--primary-400) !important;
         font-weight: 500 !important;
@@ -474,23 +511,29 @@ st.markdown(
         color: var(--neutral-900) !important;
         font-weight: 700 !important;
     }
-    
+
     h1 { font-size: 2.5rem !important; }
     h2 { font-size: 1.75rem !important; margin-top: var(--space-xl) !important; }
     h3 { font-size: 1.25rem !important; margin-top: var(--space-lg) !important; }
 
     /* ====================== */
-    /* Hide Default Elements */
+    /* Hide Default Elements (SAFE) */
     /* ====================== */
     header [data-testid="stToolbar"] { display: none !important; }
     header [data-testid="stDecoration"] { display: none !important; }
-    header { height: 0px !important; }
+
+    /* ❗️중요: 사이드바 토글 버튼이 헤더에 걸리는 버전이 있어 height 0은 위험함 */
+    header { height: 2.75rem !important; }
+
     footer { display: none !important; }
-    div[data-testid="stStatusWidget"] { display: none !important; }
+
+    /* 상태 위젯 숨김은 일단 보류(문제 생기면 다시 켜도 됨) */
+    /* div[data-testid="stStatusWidget"] { display: none !important; } */
 </style>
 """,
     unsafe_allow_html=True,
 )
+
 
 # =========================================================
 # 3) SERVICES
