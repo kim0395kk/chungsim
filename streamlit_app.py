@@ -350,37 +350,60 @@ st.markdown(
         transform: translateX(2px);
     }
 
+/* ====================== */
+    /* Sidebar Toggle Button (Fixed & Robust) */
+    /* Streamlit 버전에 상관없이 토글 버튼 강제 노출 */
     /* ====================== */
-    /* Sidebar Toggle Button (Hard-Fix + Pretty) */
-    /*  - Streamlit 버전마다 토글 testid가 다를 수 있어서 2개 다 잡음 */
-    /* ====================== */
-    button[data-testid="stSidebarCollapsedControl"],
-    button[data-testid="stSidebarCollapseButton"] {
+    
+    /* 1. 닫혀있을 때의 버튼 (Collapsed Control) */
+    [data-testid="stSidebarCollapsedControl"],
+    /* 2. 열려있을 때의 버튼 (Collapse Button) */
+    [data-testid="stSidebarCollapseButton"],
+    /* 3. 일부 최신 버전에서의 네비게이션 내부 버튼 */
+    [data-testid="stSidebarNav"] > button,
+    /* 4. 헤더 내부의 기본 버튼 (가장 범용적인 경우) */
+    header [data-testid="baseButton-header"] {
         border: 3px solid var(--warning-500) !important;
         border-radius: var(--radius-xl) !important;
         background: linear-gradient(135deg, #fff7ed 0%, var(--primary-50) 100%) !important;
         box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.20), var(--shadow-lg) !important;
         padding: 0.6rem 0.75rem !important;
-        z-index: 999999 !important;
-
-        /* ✅ “헤더에 잘려서 안 보임” 방지: 아예 고정 배치 */
+        
+        /* ✅ 중요: 어떤 상황에서도 최상단에 고정 */
+        z-index: 999999 !important; 
         position: fixed !important;
         top: 0.85rem !important;
         left: 0.85rem !important;
+        
+        /* ✅ 중요: 강제 보임 처리 */
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        width: auto !important;
+        height: auto !important;
     }
 
-    button[data-testid="stSidebarCollapsedControl"] *,
-    button[data-testid="stSidebarCollapseButton"] * {
+    /* 아이콘 색상 강제 지정 */
+    [data-testid="stSidebarCollapsedControl"] *,
+    [data-testid="stSidebarCollapseButton"] *,
+    [data-testid="stSidebarNav"] > button *,
+    header [data-testid="baseButton-header"] * {
         color: var(--neutral-900) !important;
+        fill: var(--neutral-900) !important; /* SVG 아이콘 대응 */
         font-weight: 900 !important;
     }
 
-    button[data-testid="stSidebarCollapsedControl"]:hover,
-    button[data-testid="stSidebarCollapseButton"]:hover {
+    /* 호버 효과 */
+    [data-testid="stSidebarCollapsedControl"]:hover,
+    [data-testid="stSidebarCollapseButton"]:hover,
+    [data-testid="stSidebarNav"] > button:hover,
+    header [data-testid="baseButton-header"]:hover {
         transform: scale(1.06);
         box-shadow: 0 0 0 14px rgba(245, 158, 11, 0.22), var(--shadow-xl) !important;
+        background: white !important; /* 호버 시 배경 밝게 */
     }
 
+    /* 애니메이션 정의 (기존 유지) */
     @keyframes sidebarPulse {
         0% {
             transform: scale(1);
@@ -396,9 +419,9 @@ st.markdown(
         }
     }
 
-    /* 애니메이션은 “보일 때만” 살짝 */
-    button[data-testid="stSidebarCollapsedControl"],
-    button[data-testid="stSidebarCollapseButton"] {
+    /* 애니메이션 적용 */
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="stSidebarCollapseButton"] {
         animation: sidebarPulse 1.15s infinite;
     }
 
