@@ -483,7 +483,7 @@ st.markdown(
     /* ====================== */
     /* Hide Default Elements */
     /* ====================== */
-    header [data-testid="stToolbar"] { display: none !important; }
+    header [data-testid="stToolbar"]
     /* ===== PATCH FIX (Streamlit newer DOM) ===== */
 
 /* 헤더는 0으로 만들지 말 것 (툴바/데코만 숨김) */
