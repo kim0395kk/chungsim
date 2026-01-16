@@ -327,6 +327,7 @@ st.markdown(
     div[data-testid="stSidebar"] {
         background: white;
         border-right: 1px solid var(--neutral-200);
+        z-index: 999998 !important; /* 다른 레이어에 밀려 안 보이는 현상 방지 */
     }
 
     div[data-testid="stSidebar"] button[kind="secondary"] {
@@ -350,23 +351,32 @@ st.markdown(
     }
 
     /* ====================== */
-    /* Sidebar Toggle Button (Collapsed control) */
+    /* Sidebar Toggle Button (Hard-Fix + Pretty) */
+    /*  - Streamlit 버전마다 토글 testid가 다를 수 있어서 2개 다 잡음 */
     /* ====================== */
-    button[data-testid="stSidebarCollapsedControl"] {
+    button[data-testid="stSidebarCollapsedControl"],
+    button[data-testid="stSidebarCollapseButton"] {
         border: 3px solid var(--warning-500) !important;
         border-radius: var(--radius-xl) !important;
         background: linear-gradient(135deg, #fff7ed 0%, var(--primary-50) 100%) !important;
         box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.20), var(--shadow-lg) !important;
-        animation: sidebarPulse 1.15s infinite;
         padding: 0.6rem 0.75rem !important;
+        z-index: 999999 !important;
+
+        /* ✅ “헤더에 잘려서 안 보임” 방지: 아예 고정 배치 */
+        position: fixed !important;
+        top: 0.85rem !important;
+        left: 0.85rem !important;
     }
 
-    button[data-testid="stSidebarCollapsedControl"] * {
+    button[data-testid="stSidebarCollapsedControl"] *,
+    button[data-testid="stSidebarCollapseButton"] * {
         color: var(--neutral-900) !important;
         font-weight: 900 !important;
     }
 
-    button[data-testid="stSidebarCollapsedControl"]:hover {
+    button[data-testid="stSidebarCollapsedControl"]:hover,
+    button[data-testid="stSidebarCollapseButton"]:hover {
         transform: scale(1.06);
         box-shadow: 0 0 0 14px rgba(245, 158, 11, 0.22), var(--shadow-xl) !important;
     }
@@ -384,6 +394,12 @@ st.markdown(
             transform: scale(1);
             box-shadow: 0 0 0 10px rgba(245,158,11,0.20), var(--shadow-lg);
         }
+    }
+
+    /* 애니메이션은 “보일 때만” 살짝 */
+    button[data-testid="stSidebarCollapsedControl"],
+    button[data-testid="stSidebarCollapseButton"] {
+        animation: sidebarPulse 1.15s infinite;
     }
 
     /* ====================== */
@@ -517,18 +533,25 @@ st.markdown(
     h3 { font-size: 1.25rem !important; margin-top: var(--space-lg) !important; }
 
     /* ====================== */
-    /* Hide Default Elements (SAFE) */
+    /* Hide Default Elements (SAFE-ish) */
+    /*  - ❗header 높이를 고정/축소하지 말 것 (토글 잘림 방지) */
     /* ====================== */
-    header [data-testid="stToolbar"] { display: none !important; }
     header [data-testid="stDecoration"] { display: none !important; }
 
-    /* ❗️중요: 사이드바 토글 버튼이 헤더에 걸리는 버전이 있어 height 0은 위험함 */
-    header { height: 2.75rem !important; }
+    /* 툴바는 완전 제거 대신 “투명 + 클릭 불가”로 배치 유지 */
+    header [data-testid="stToolbar"] {
+        opacity: 0.12 !important;
+        pointer-events: none !important;
+    }
+
+    /* header 자체는 auto로 두고, 잘림 방지 */
+    header {
+        height: auto !important;
+        min-height: 3.25rem !important;
+        overflow: visible !important;
+    }
 
     footer { display: none !important; }
-
-    /* 상태 위젯 숨김은 일단 보류(문제 생기면 다시 켜도 됨) */
-    /* div[data-testid="stStatusWidget"] { display: none !important; } */
 </style>
 """,
     unsafe_allow_html=True,
