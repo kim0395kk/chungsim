@@ -521,44 +521,53 @@ section[data-testid="stSidebar"]{
 )
 import streamlit as st
 
-# 1. 페이지 설정 (가장 먼저 실행)
+# 1. 안전장치: 앱 시작 시 사이드바를 일단 열어둡니다.
 st.set_page_config(
     layout="wide",
-    page_title="AI 행정관 Pro - Govable AI",
+    page_title="AI 행정관 Pro",
     page_icon="⚖️",
     initial_sidebar_state="expanded"
 )
 
-# 2. CSS 적용 (기존 스타일 코드 모두 지우고 이것만 넣으세요)
+# 2. CSS 스타일 적용
 st.markdown("""
     <style>
-        /* [1] 헤더 영역 초기화: 일단 다 보이게 하고 배경만 투명하게 */
+        /* [1] 헤더 영역 설정 */
+        /* 헤더를 숨기지 않습니다(visible). 배경만 투명하게 만듭니다. */
         header[data-testid="stHeader"] {
             visibility: visible !important;
             background: transparent !important;
+            z-index: 1 !important;
         }
 
-        /* [2] 오른쪽 요소들(툴바, 점3개 메뉴, 장식줄) 투명화 */
-        /* display: none을 쓰면 자리가 없어져 레이아웃이 깨지므로 */
-        /* 자리는 차지하되 눈에만 안 보이게(hidden) 처리합니다. */
+        /* [2] 오른쪽 놈들(툴바, 점3개, 장식줄) 투명화 */
+        /* 자리는 차지하되(visibility: hidden), 눈에만 안 보이게 합니다. */
+        /* display: none을 쓰면 자리가 없어져서 화살표 위치가 깨집니다. */
         [data-testid="stToolbar"], 
         [data-testid="stHeaderActionElements"], 
         [data-testid="stDecoration"] {
             visibility: hidden !important;
-            pointer-events: none !important; /* 클릭도 안 되게 막음 */
+            pointer-events: none !important;
         }
 
-        /* [3] 왼쪽 사이드바 버튼 복구 */
-        /* 위치를 강제로 옮기지 않고(fixed 금지) 원래 자리에 둡니다. */
+        /* [3] 왼쪽 화살표 버튼 살리기 (핵심!) */
         [data-testid="stSidebarCollapsedControl"] {
+            /* 무조건 보이게 설정 */
             visibility: visible !important;
             display: block !important;
+            
+            /* 배경색에 묻히지 않도록 글자/아이콘 색상을 '검은색'으로 강제 */
+            color: #000000 !important;
+            
+            /* 다른 요소 위에 올라오도록 z-index 최상위 설정 */
+            z-index: 999999 !important;
         }
-        
-        /* [4] 색상 강제 지정 (혹시 버튼이 흰색이라 안 보일까 봐) */
+
+        /* [4] 화살표 아이콘(SVG) 색상 강제 적용 */
+        /* 버튼 통은 보이는데 아이콘 그림만 흰색이라 안 보일 수 있어서 칠해줍니다 */
         [data-testid="stSidebarCollapsedControl"] svg {
-            fill: #31333F !important; /* 진한 회색 (기본색) */
-            stroke: #31333F !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
         }
     </style>
 """, unsafe_allow_html=True)
