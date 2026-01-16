@@ -137,7 +137,11 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
 # =========================================================
 # 2) STYLES  (✅ 여기 CSS/디자인은 네가 준 그대로. 변경 없음)
 # =========================================================
-st.set_page_config(layout="wide", page_title="AI 행정관 Pro - Govable AI", page_icon="⚖️")
+st.set_page_config(layout="wide",
+    page_title="AI 행정관 Pro - Govable AI",
+    page_icon="⚖️",
+    initial_sidebar_state="expanded"  # ✅ 사이드바 강제 펼침
+))
 st.markdown(
     """
 <style>
