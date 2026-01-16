@@ -521,43 +521,33 @@ section[data-testid="stSidebar"]{
 )
 st.markdown("""
     <style>
-        /* 1. 우측 상단 툴바(메뉴)와 무지개 데코레이션 삭제 */
-        [data-testid="stToolbar"], 
-        [data-testid="stDecoration"] {
-            display: none !important;
-            visibility: hidden !important;
-        }
-
-        /* 2. 헤더 배경 투명화 (혹시 버튼을 가릴까봐) */
+        /* 헤더는 보이게 설정 */
         header[data-testid="stHeader"] {
-            background: transparent !important;
+            visibility: visible !important;
             z-index: 1 !important;
         }
+        
+        /* 헤더의 '가상 요소(::after)'를 만들어 오른쪽 절반을 하얀색으로 덮어버림 */
+        header[data-testid="stHeader"]::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 50%;  /* 오른쪽 절반 */
+            height: 100%;
+            background: white !important; /* 하얀색 페인트 */
+            z-index: 999 !important; /* 메뉴보다 위에 그림 */
+            pointer-events: all !important; /* 클릭도 가로챔 */
+        }
 
-        /* 3. ★ 핵심: 사이드바 여는 버튼을 '화면 좌표'에 강제로 고정 */
-        /* 헤더 안에 갇혀있지 말고 화면 밖으로 끄집어내는 코드입니다 */
+        /* 왼쪽 버튼은 그 하얀색 박스보다 더 위로 끄집어냄 */
         [data-testid="stSidebarCollapsedControl"] {
-            display: block !important;
-            visibility: visible !important;
-            position: fixed !important;    /* 헤더 흐름 무시하고 고정 */
-            top: 0.8rem !important;        /* 위쪽 여백 */
-            left: 0.8rem !important;       /* 왼쪽 여백 */
-            z-index: 1000001 !important;   /* 무조건 맨 위로 */
-            color: inherit !important;     /* 기본 색상 유지 */
-            width: auto !important;
-            height: auto !important;
+            z-index: 1000 !important;
+            position: relative !important;
         }
-
-        /* 4. 혹시 버튼이 안 보일 경우를 대비해 배경색 추가 (선택사항) */
-        /* 버튼 위치 확인용입니다. 나중에 색상은 빼셔도 됩니다. */
-        /*
-        [data-testid="stSidebarCollapsedControl"] button {
-            background-color: #f0f2f6 !important;
-            border-radius: 8px !important;
-        }
-        */
     </style>
 """, unsafe_allow_html=True)
+
 # ====== LAST: sidebar toggle rescue (must be the last CSS injected) ======
 st.markdown("""
 <style>
