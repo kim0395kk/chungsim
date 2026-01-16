@@ -141,7 +141,7 @@ st.set_page_config(layout="wide",
     page_title="AI 행정관 Pro - Govable AI",
     page_icon="⚖️",
     initial_sidebar_state="expanded"  # ✅ 사이드바 강제 펼침
-))
+)
 st.markdown(
     """
 <style>
