@@ -521,28 +521,36 @@ section[data-testid="stSidebar"]{
 )
 st.markdown("""
     <style>
-        /* 1. 헤더 전체를 일단 다 보이게 합니다 (그래야 왼쪽 버튼이 나옵니다) */
+        /* 1. 헤더 전체 영역은 '투명'하게 보이도록 설정 */
         header[data-testid="stHeader"] {
-            visibility: visible !important;
             background: transparent !important;
+            visibility: visible !important;
         }
 
-        /* 2. [핵심] 오른쪽 툴바(메뉴)를 '삭제'하지 않고 '투명'하게 만듭니다 */
-        /* display: none을 쓰면 자리가 없어져서 레이아웃이 밀리지만, */
-        /* visibility: hidden을 쓰면 자리는 차지하되 눈에만 안 보입니다. (가장 안전) */
-        [data-testid="stToolbar"] {
-            visibility: hidden !important; 
-            pointer-events: none !important; /* 투명하지만 클릭도 안 되게 막음 */
-        }
-
-        /* 3. 상단 장식줄(무지개색)은 아예 삭제 */
-        [data-testid="stDecoration"] {
+        /* 2. [오른쪽 삭제] 툴바, 메뉴(점 3개), 액션 버튼들 전부 숨김 */
+        [data-testid="stToolbar"], 
+        [data-testid="stMainMenu"], 
+        [data-testid="stHeaderActionElements"] {
+            visibility: hidden !important;
             display: none !important;
         }
 
-        /* 4. 왼쪽 사이드바 버튼은 확실하게 보여줍니다 */
+        /* 3. [상단 장식 삭제] 무지개 라인 삭제 */
+        [data-testid="stDecoration"] {
+            visibility: hidden !important;
+            display: none !important;
+        }
+
+        /* 4. [왼쪽 복구] 사이드바 여는 버튼(Chevron) 강제 표시 */
+        /* 헤더 구조와 상관없이 화면 왼쪽 상단에 '고정'시킵니다 */
         [data-testid="stSidebarCollapsedControl"] {
             visibility: visible !important;
+            display: block !important;
+            position: fixed !important;
+            top: 15px !important;    /* 상단 여백 */
+            left: 15px !important;   /* 좌측 여백 */
+            z-index: 1000002 !important; /* 다른 요소보다 위에 배치 */
+            color: inherit !important;
         }
     </style>
 """, unsafe_allow_html=True)
