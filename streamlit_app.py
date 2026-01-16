@@ -519,38 +519,57 @@ section[data-testid="stSidebar"]{
 """,
     unsafe_allow_html=True,
 )
+import streamlit as st
+
+# 1. 페이지 설정 (사이드바가 열린 상태로 시작하게 함)
+st.set_page_config(
+    layout="wide",
+    page_title="AI 행정관 Pro - Govable AI",
+    page_icon="⚖️",
+    initial_sidebar_state="expanded" 
+)
+
+# 2. 강력한 CSS 적용
 st.markdown("""
     <style>
-        /* 1. 헤더 전체 영역은 '투명'하게 보이도록 설정 */
+        /* [1] 헤더 전체: 투명하게 만들되, 공간은 유지 (안 그러면 레이아웃 깨짐) */
         header[data-testid="stHeader"] {
             background: transparent !important;
-            visibility: visible !important;
+            visibility: visible !important;  /* 일단 보이게 둠 */
         }
 
-        /* 2. [오른쪽 삭제] 툴바, 메뉴(점 3개), 액션 버튼들 전부 숨김 */
+        /* [2] 오른쪽 놈들 싹 다 숨기기 (툴바, 점 3개, 액션 버튼 등) */
         [data-testid="stToolbar"], 
-        [data-testid="stMainMenu"], 
-        [data-testid="stHeaderActionElements"] {
-            visibility: hidden !important;
-            display: none !important;
-        }
-
-        /* 3. [상단 장식 삭제] 무지개 라인 삭제 */
+        [data-testid="stHeaderActionElements"], 
         [data-testid="stDecoration"] {
-            visibility: hidden !important;
             display: none !important;
+            visibility: hidden !important;
         }
 
-        /* 4. [왼쪽 복구] 사이드바 여는 버튼(Chevron) 강제 표시 */
-        /* 헤더 구조와 상관없이 화면 왼쪽 상단에 '고정'시킵니다 */
+        /* [3] 왼쪽 사이드바 버튼: 위치 고정 + 색상 강제 (핵심!) */
         [data-testid="stSidebarCollapsedControl"] {
-            visibility: visible !important;
             display: block !important;
+            visibility: visible !important;
+            
+            /* 위치를 화면 좌측 상단에 못 박아버림 */
             position: fixed !important;
-            top: 15px !important;    /* 상단 여백 */
-            left: 15px !important;   /* 좌측 여백 */
-            z-index: 1000002 !important; /* 다른 요소보다 위에 배치 */
-            color: inherit !important;
+            top: 20px !important;
+            left: 20px !important;
+            
+            /* 투명해졌을까봐 색상을 강제로 검정으로 지정 */
+            color: #000000 !important; 
+            
+            /* 다른 요소 위에 올라오도록 z-index 최상위 설정 */
+            z-index: 999999 !important;
+            
+            /* 클릭 가능하게 설정 */
+            pointer-events: auto !important;
+        }
+        
+        /* 버튼 내부 아이콘 색상도 강제로 검정 */
+        [data-testid="stSidebarCollapsedControl"] svg {
+            fill: #000000 !important;
+            stroke: #000000 !important;
         }
     </style>
 """, unsafe_allow_html=True)
