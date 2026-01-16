@@ -521,7 +521,7 @@ section[data-testid="stSidebar"]{
 )
 import streamlit as st
 
-# 1. 안전장치: 앱 시작 시 사이드바를 일단 열어둡니다.
+# 1. 페이지 설정: 사이드바를 일단 열고 시작 (버튼이 없어도 사이드바는 보이게)
 st.set_page_config(
     layout="wide",
     page_title="AI 행정관 Pro",
@@ -532,46 +532,42 @@ st.set_page_config(
 # 2. CSS 스타일 적용
 st.markdown("""
     <style>
-        /* [1] 헤더 영역 설정 */
-        /* 헤더를 숨기지 않습니다(visible). 배경만 투명하게 만듭니다. */
+        /* [1] 헤더 배경 투명화 */
+        /* 헤더 박스는 그대로 두고 배경색만 없앱니다. */
         header[data-testid="stHeader"] {
-            visibility: visible !important;
             background: transparent !important;
-            z-index: 1 !important;
         }
 
-        /* [2] 오른쪽 놈들(툴바, 점3개, 장식줄) 투명화 */
-        /* 자리는 차지하되(visibility: hidden), 눈에만 안 보이게 합니다. */
-        /* display: none을 쓰면 자리가 없어져서 화살표 위치가 깨집니다. */
+        /* [2] 오른쪽 메뉴들 (툴바, 데코레이션) 아예 삭제 */
+        /* display: none으로 깔끔하게 지웁니다. */
         [data-testid="stToolbar"], 
         [data-testid="stHeaderActionElements"], 
         [data-testid="stDecoration"] {
-            visibility: hidden !important;
-            pointer-events: none !important;
+            display: none !important;
         }
 
-        /* [3] 왼쪽 화살표 버튼 살리기 (핵심!) */
+        /* [3] 왼쪽 사이드바 여는 버튼 (Chevron) 복구 */
+        /* 위치를 강제로 옮기지 않습니다(fixed 금지). 원래 흐름대로 둡니다. */
         [data-testid="stSidebarCollapsedControl"] {
-            /* 무조건 보이게 설정 */
-            visibility: visible !important;
             display: block !important;
-            
-            /* 배경색에 묻히지 않도록 글자/아이콘 색상을 '검은색'으로 강제 */
-            color: #000000 !important;
-            
-            /* 다른 요소 위에 올라오도록 z-index 최상위 설정 */
-            z-index: 999999 !important;
+            visibility: visible !important;
+            color: #000000 !important; /* 검은색 강제 */
+            z-index: 999999 !important; /* 맨 앞으로 */
         }
-
-        /* [4] 화살표 아이콘(SVG) 색상 강제 적용 */
-        /* 버튼 통은 보이는데 아이콘 그림만 흰색이라 안 보일 수 있어서 칠해줍니다 */
+        
+        /* [4] 버튼 아이콘 색상 강제 (이게 핵심일 수 있습니다) */
         [data-testid="stSidebarCollapsedControl"] svg {
             fill: #000000 !important;
             stroke: #000000 !important;
         }
+        
+        /* [5] 혹시 버튼이 너무 작게 찌그러졌을까봐 크기 지정 */
+        [data-testid="stSidebarCollapsedControl"] button {
+            width: auto !important;
+            height: auto !important;
+        }
     </style>
 """, unsafe_allow_html=True)
-
 # ====== LAST: sidebar toggle rescue (must be the last CSS injected) ======
 st.markdown("""
 <style>
