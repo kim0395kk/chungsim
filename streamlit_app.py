@@ -132,6 +132,92 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
     if len(s) <= limit:
         return s
     return s[:limit] + "\n...(생략)"
+def render_law_case_split(res: dict):
+    """[검토] 법령 및 유사사례를 2열 구획으로 렌더링(캡처 스타일)"""
+    law_pack = res.get("law_pack") or {}
+    items = law_pack.get("items") or []
+    news_md = res.get("search", "") or ""
+
+    with st.expander("✅ [검토] 법령 및 유사 사례 확인", expanded=True):
+        col_law, col_case = st.columns(2, gap="large")
+
+        # -------------------------
+        # LEFT: 적용 법령
+        # -------------------------
+        with col_law:
+            st.markdown("#### 🏛️ 적용 법령 (법령명 클릭 시 현행 원문 새창)")
+
+            # streamlit>=1.32 기준: border=True 지원
+            try:
+                box = st.container(border=True)
+            except TypeError:
+                box = st.container()
+
+            with box:
+                st.markdown(f"🔎 **AI가 식별한 핵심 법령 ({len(items)}건)**")
+
+                if not items:
+                    st.caption("표시할 법령이 없습니다.")
+                else:
+                    for i, it in enumerate(items, 1):
+                        law_name = (it.get("law_name") or "").strip()
+                        link = (it.get("link") or "").strip()
+                        art = it.get("article_num")
+                        why = (it.get("why") or "").strip()
+                        excerpt = (it.get("excerpt") or "").strip()
+
+                        art_txt = f" 제{int(art)}조" if isinstance(art, (int, float)) else ""
+
+                        # 제목(클릭 시 새창)
+                        if link:
+                            st.markdown(
+                                f'✅ <b>{i}. <a href="{_escape(link)}" target="_blank" rel="noopener">'
+                                f'{_escape(law_name)}</a>{_escape(art_txt)}</b>',
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(f"⚠️ **{i}. {law_name}{art_txt}**")
+
+                        if why:
+                            st.caption(f"사유: {why}")
+
+                        # 발췌(너무 길면 접기)
+                        if excerpt:
+                            short = excerpt[:900] + ("…" if len(excerpt) > 900 else "")
+                            st.markdown(
+                                f"<div style='white-space:pre-wrap; line-height:1.7; font-size:0.95rem;'>"
+                                f"{_escape(short)}"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                            if len(excerpt) > 900:
+                                with st.expander("전문 보기", expanded=False):
+                                    st.markdown(
+                                        f"<div style='white-space:pre-wrap; line-height:1.7;'>"
+                                        f"{_escape(excerpt)}"
+                                        f"</div>",
+                                        unsafe_allow_html=True,
+                                    )
+
+                        st.divider()
+
+        # -------------------------
+        # RIGHT: 관련 뉴스/사례
+        # -------------------------
+        with col_case:
+            st.markdown("#### 🟩 관련 뉴스/사례")
+
+            try:
+                box2 = st.container(border=True)
+            except TypeError:
+                box2 = st.container()
+
+            with box2:
+                if not news_md.strip():
+                    st.caption("표시할 뉴스/사례가 없습니다.")
+                else:
+                    # 캡처처럼 '파란 안내 박스' 느낌을 주려면 st.info가 제일 비슷함
+                    st.info(news_md)
 
 
 # =========================================================
@@ -2037,30 +2123,7 @@ def main():
                 for x in a.get("recommended_next_action", []):
                     st.write("- ", x)
 
-            st.markdown(
-                """
-                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
-                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
-                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
-                        📜 법령 근거
-                    </h3>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown(res.get("law", ""))
-
-            st.markdown(
-                """
-                <div style='background: white; padding: 1.5rem; border-radius: 12px; 
-                            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 1.5rem 0;'>
-                    <h3 style='margin: 0 0 1rem 0; color: #1f2937; font-size: 1.25rem; font-weight: 700;'>
-                        📰 뉴스/사례
-                    </h3>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            
             st.markdown(res.get("search", ""))
 
             st.markdown(
