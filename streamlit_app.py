@@ -351,48 +351,79 @@ st.markdown(
     }
 
 /* ====================== */
-    /* Sidebar Toggle Button (Fixed & Robust) */
-    /* Streamlit 버전에 상관없이 토글 버튼 강제 노출 */
+    /* [수정 2차] 헤더 및 사이드바 버튼 강제 복구 */
     /* ====================== */
-    
-    /* 1. 닫혀있을 때의 버튼 (Collapsed Control) */
-    [data-testid="stSidebarCollapsedControl"],
-    /* 2. 열려있을 때의 버튼 (Collapse Button) */
-    [data-testid="stSidebarCollapseButton"],
-    /* 3. 일부 최신 버전에서의 네비게이션 내부 버튼 */
-    [data-testid="stSidebarNav"] > button,
-    /* 4. 헤더 내부의 기본 버튼 (가장 범용적인 경우) */
-    header [data-testid="baseButton-header"] {
-        border: 3px solid var(--warning-500) !important;
-        border-radius: var(--radius-xl) !important;
-        background: linear-gradient(135deg, #fff7ed 0%, var(--primary-50) 100%) !important;
-        box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.20), var(--shadow-lg) !important;
-        padding: 0.6rem 0.75rem !important;
-        
-        /* ✅ 중요: 어떤 상황에서도 최상단에 고정 */
-        z-index: 999999 !important; 
-        position: fixed !important;
-        top: 0.85rem !important;
-        left: 0.85rem !important;
-        
-        /* ✅ 중요: 강제 보임 처리 */
-        display: block !important;
+
+    /* 1. 헤더 영역 전체 초기화 (숨김 해제) */
+    header {
+        background: transparent !important;
         visibility: visible !important;
-        opacity: 1 !important;
-        width: auto !important;
         height: auto !important;
+        /* 버튼이 헤더 뒤로 숨지 않도록 z-index 설정 */
+        z-index: 100 !important; 
     }
 
-    /* 아이콘 색상 강제 지정 */
-    [data-testid="stSidebarCollapsedControl"] *,
-    [data-testid="stSidebarCollapseButton"] *,
-    [data-testid="stSidebarNav"] > button *,
-    header [data-testid="baseButton-header"] * {
-        color: var(--neutral-900) !important;
-        fill: var(--neutral-900) !important; /* SVG 아이콘 대응 */
-        font-weight: 900 !important;
+    /* 2. 툴바(우측 메뉴)는 숨기되, "공간"은 유지하여 버튼 간섭 방지 */
+    header [data-testid="stToolbar"] {
+        opacity: 1 !important; /* 투명도 복구 */
+        background: transparent !important;
+        pointer-events: auto !important; /* 클릭 가능하도록 복구 */
+        right: 2rem; /* 우측으로 좀 더 밀어넣기 */
     }
 
+    /* 3. 장식용 컬러 라인(데코레이션)만 숨김 */
+    header [data-testid="stDecoration"] {
+        display: none !important;
+    }
+
+    /* 4. 사이드바 토글 버튼 (가장 강력한 선택자 사용) */
+    /* 버튼이 어디에 있든 화면 좌측 상단에 고정 */
+    button[data-testid="stSidebarCollapsedControl"],
+    button[data-testid="stSidebarCollapseButton"],
+    [data-testid="stHeader"] button[title="Expand sidebar"],
+    [data-testid="stHeader"] button[title="Collapse sidebar"] {
+        
+        /* 위치 및 크기 강제 지정 */
+        display: block !important;
+        position: fixed !important;
+        top: 1rem !important;
+        left: 1rem !important;
+        z-index: 999999 !important; /* 최상위 레이어 */
+        
+        /* 디자인 스타일링 */
+        width: 3rem !important;
+        height: 3rem !important;
+        background: linear-gradient(135deg, #fff7ed 0%, #eff6ff 100%) !important;
+        border: 3px solid #f59e0b !important; /* 주황색 테두리 */
+        border-radius: 50% !important; /* 원형으로 변경 */
+        box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3) !important;
+        
+        /* 텍스트/아이콘 색상 */
+        color: #111827 !important;
+        
+        /* 애니메이션 */
+        transition: all 0.3s ease !important;
+    }
+
+    /* 버튼 호버 효과 */
+    button[data-testid="stSidebarCollapsedControl"]:hover,
+    button[data-testid="stSidebarCollapseButton"]:hover,
+    [data-testid="stHeader"] button[title="Expand sidebar"]:hover,
+    [data-testid="stHeader"] button[title="Collapse sidebar"]:hover {
+        transform: scale(1.1) rotate(90deg); /* 회전 효과 추가 */
+        background: #fff !important;
+        border-color: #d97706 !important;
+        box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2) !important;
+    }
+
+    /* 아이콘(SVG) 크기 및 색상 강제 */
+    button[data-testid="stSidebarCollapsedControl"] svg,
+    button[data-testid="stSidebarCollapseButton"] svg {
+        width: 1.5rem !important;
+        height: 1.5rem !important;
+        fill: #111827 !important;
+        stroke: #111827 !important;
+    }
     /* 호버 효과 */
     [data-testid="stSidebarCollapsedControl"]:hover,
     [data-testid="stSidebarCollapseButton"]:hover,
