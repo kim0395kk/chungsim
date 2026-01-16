@@ -138,7 +138,6 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
 # 2) STYLES  (✅ 여기 CSS/디자인은 네가 준 그대로. 변경 없음)
 # =========================================================
 st.set_page_config(layout="wide", page_title="AI Bureau: The Legal Glass", page_icon="⚖️")
-"""
 st.markdown(
     """
 <style>
@@ -491,7 +490,7 @@ st.markdown(
 </style>
 """,
     unsafe_allow_html=True,
-)"""
+)
 
 # =========================================================
 # 3) SERVICES
