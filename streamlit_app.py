@@ -489,7 +489,7 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
     div[data-testid="stStatusWidget"] { display: none !important; }
 </style>
 """,
-    unsafe_allow_html=True,
+    #unsafe_allow_html=True,
 )
 
 # =========================================================
