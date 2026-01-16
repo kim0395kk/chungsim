@@ -519,7 +519,39 @@ section[data-testid="stSidebar"]{
 """,
     unsafe_allow_html=True,
 )
+st.set_page_config(
+    layout="wide",
+    page_title="AI 행정관 Pro",
+    page_icon="⚖️",
+    initial_sidebar_state="expanded"
+)
 
+# 2. CSS: 헤더 통째로 삭제
+st.markdown("""
+    <style>
+        /* [1] 헤더(Header) 전체 삭제 */
+        /* 툴바, 햄버거 메뉴, 사이드바 여닫기 버튼이 모두 포함된 헤더를 없앱니다. */
+        header[data-testid="stHeader"] {
+            display: none !important;
+        }
+
+        /* [2] 내용물 위치 보정 */
+        /* 헤더가 사라지면 본문이 너무 위로 붙으니까 여백을 줍니다. */
+        .main .block-container {
+            padding-top: 2rem !important;
+        }
+        
+        /* [3] (혹시 모를 잔재 삭제) 사이드바 여닫는 버튼 자체도 숨김 */
+        [data-testid="stSidebarCollapsedControl"] {
+            display: none !important;
+        }
+        
+        /* [4] 사이드바 상단 여백 제거 (헤더가 없으므로 꽉 채우기) */
+        section[data-testid="stSidebar"] {
+            top: 0 !important; 
+        }
+    </style>
+""", unsafe_allow_html=True)
 # ====== LAST: sidebar toggle rescue (must be the last CSS injected) ======
 st.markdown("""
 <style>
