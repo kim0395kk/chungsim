@@ -484,13 +484,37 @@ st.markdown(
     /* Hide Default Elements */
     /* ====================== */
     header [data-testid="stToolbar"] { display: none !important; }
-    header [data-testid="stDecoration"] { display: none !important; }
-    footer { display: none !important; }
-    div[data-testid="stStatusWidget"] { display: none !important; }
-    /* --- SAFETY: sidebar toggle & sidebar must stay visible --- */
-div[data-testid="collapsedControl"] { visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }
-section[data-testid="stSidebar"] { display: block !important; visibility: visible !important; }
+    /* ===== PATCH FIX (Streamlit newer DOM) ===== */
 
+/* 헤더는 0으로 만들지 말 것 (툴바/데코만 숨김) */
+header [data-testid="stToolbar"] { display: none !important; }
+header [data-testid="stDecoration"] { display: none !important; }
+
+/* ✅ 토글이 새 DOM로 잡히는 경우까지 전부 살리기 */
+[data-testid="stSidebarCollapsedControl"],
+div[data-testid="collapsedControl"]{
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  position: fixed !important;
+  top: 10px !important;
+  left: 10px !important;
+  z-index: 999999 !important;
+}
+
+/* 버튼 자체가 헤더 버튼으로 잡히는 케이스(신형) */
+button[data-testid="stBaseButton-headerNoPadding"]{
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* 사이드바 컨테이너도 강제 표시 */
+section[data-testid="stSidebar"]{
+  display: block !important;
+  visibility: visible !important;
+}
 </style>
 """,
     unsafe_allow_html=True,
