@@ -519,6 +519,24 @@ section[data-testid="stSidebar"]{
 """,
     unsafe_allow_html=True,
 )
+# ==========================================
+# 상단 우측 메뉴(툴바) 숨기기
+# ==========================================
+st.markdown("""
+    <style>
+        /* 상단 우측의 툴바(Share, GitHub, 메뉴 등)만 숨김 */
+        [data-testid="stToolbar"] {
+            visibility: hidden;
+            height: 0%;
+        }
+
+        /* (선택사항) 상단에 얇은 컬러 라인(데코레이션)도 숨기려면 아래 주석 해제 */
+        /* [data-testid="stDecoration"] { visibility: hidden; } */
+        
+        /* (선택사항) 하단 'Made with Streamlit' 푸터 숨기기 */
+        footer { visibility: hidden; }
+    </style>
+""", unsafe_allow_html=True)
 
 # ====== LAST: sidebar toggle rescue (must be the last CSS injected) ======
 st.markdown("""
