@@ -599,7 +599,7 @@ st.markdown(
     /* 툴바는 완전 제거 대신 “투명 + 클릭 불가”로 배치 유지 */
     header [data-testid="stToolbar"] {
         opacity: 0.12 !important;
-        pointer-events: none !important;
+        /*pointer-events: none !important;
     }
 
     /* header 자체는 auto로 두고, 잘림 방지 */
