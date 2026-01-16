@@ -532,44 +532,33 @@ st.set_page_config(
 # 2. 강력한 CSS 적용
 st.markdown("""
     <style>
-        /* [1] 헤더 전체: 투명하게 만들되, 공간은 유지 (안 그러면 레이아웃 깨짐) */
+        /* 1. [초기화] 헤더 영역을 강제로 보이게 하고, 배경만 투명하게 만듭니다 */
         header[data-testid="stHeader"] {
+            visibility: visible !important;
             background: transparent !important;
-            visibility: visible !important;  /* 일단 보이게 둠 */
         }
 
-        /* [2] 오른쪽 놈들 싹 다 숨기기 (툴바, 점 3개, 액션 버튼 등) */
+        /* 2. [핵심] 오른쪽 툴바와 메뉴를 '삭제'하지 않고 '투명'하게 만듭니다. */
+        /* display: none을 쓰면 자리가 없어져서 왼쪽 버튼도 같이 사라지므로, */
+        /* 자리는 차지하되 눈에만 안 보이게(visibility: hidden) 처리합니다. */
         [data-testid="stToolbar"], 
         [data-testid="stHeaderActionElements"], 
         [data-testid="stDecoration"] {
-            display: none !important;
             visibility: hidden !important;
+            pointer-events: none !important; /* 투명한 곳을 클릭해도 반응 없게 */
         }
 
-        /* [3] 왼쪽 사이드바 버튼: 위치 고정 + 색상 강제 (핵심!) */
+        /* 3. [안전장치] 왼쪽 사이드바 버튼은 '보임' 상태 유지 */
+        /* 위치를 강제로 옮기지 않습니다(position: fixed 금지). 원래 자리에 있게 둡니다. */
         [data-testid="stSidebarCollapsedControl"] {
-            display: block !important;
             visibility: visible !important;
-            
-            /* 위치를 화면 좌측 상단에 못 박아버림 */
-            position: fixed !important;
-            top: 20px !important;
-            left: 20px !important;
-            
-            /* 투명해졌을까봐 색상을 강제로 검정으로 지정 */
-            color: #000000 !important; 
-            
-            /* 다른 요소 위에 올라오도록 z-index 최상위 설정 */
-            z-index: 999999 !important;
-            
-            /* 클릭 가능하게 설정 */
-            pointer-events: auto !important;
+            display: block !important;
         }
         
-        /* 버튼 내부 아이콘 색상도 강제로 검정 */
+        /* 4. [색상 보정] 혹시 버튼이 흰색이라 안 보일까 봐 아이콘을 진한 회색으로 칠합니다 */
         [data-testid="stSidebarCollapsedControl"] svg {
-            fill: #000000 !important;
-            stroke: #000000 !important;
+            fill: #31333F !important; /* 스트림릿 기본 회색 */
+            stroke: #31333F !important;
         }
     </style>
 """, unsafe_allow_html=True)
