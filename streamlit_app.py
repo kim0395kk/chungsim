@@ -521,34 +521,43 @@ section[data-testid="stSidebar"]{
 )
 st.markdown("""
     <style>
-        /* [중요] 1. 헤더(Header) 컨테이너 자체는 보이게 둡니다. */
-        /* 이걸 숨기면 왼쪽 버튼이 살 공간이 사라집니다. */
-        header[data-testid="stHeader"] {
-            visibility: visible !important;
-            background: transparent !important; /* 배경만 투명하게 */
-        }
-
-        /* 2. 현재 문제인 '오른쪽 툴바(메뉴)'만 콕 집어서 삭제합니다. */
-        [data-testid="stToolbar"] {
-            visibility: hidden !important;
-            display: none !important;
-        }
-
-        /* 3. (안전장치) 왼쪽 사이드바 여는 버튼(Chevron)은 확실하게 보이게 강제합니다. */
-        [data-testid="stSidebarCollapsedControl"] {
-            visibility: visible !important;
-            display: block !important;
-            color: black !important; /* 버튼 색상이 배경색과 같아 안 보일 경우 대비 */
-        }
-        
-        /* 4. (선택사항) 상단의 무지개색 줄(Decoration)도 거슬리면 숨김 */
+        /* 1. 우측 상단 툴바(메뉴)와 무지개 데코레이션 삭제 */
+        [data-testid="stToolbar"], 
         [data-testid="stDecoration"] {
-            visibility: hidden !important;
             display: none !important;
+            visibility: hidden !important;
         }
+
+        /* 2. 헤더 배경 투명화 (혹시 버튼을 가릴까봐) */
+        header[data-testid="stHeader"] {
+            background: transparent !important;
+            z-index: 1 !important;
+        }
+
+        /* 3. ★ 핵심: 사이드바 여는 버튼을 '화면 좌표'에 강제로 고정 */
+        /* 헤더 안에 갇혀있지 말고 화면 밖으로 끄집어내는 코드입니다 */
+        [data-testid="stSidebarCollapsedControl"] {
+            display: block !important;
+            visibility: visible !important;
+            position: fixed !important;    /* 헤더 흐름 무시하고 고정 */
+            top: 0.8rem !important;        /* 위쪽 여백 */
+            left: 0.8rem !important;       /* 왼쪽 여백 */
+            z-index: 1000001 !important;   /* 무조건 맨 위로 */
+            color: inherit !important;     /* 기본 색상 유지 */
+            width: auto !important;
+            height: auto !important;
+        }
+
+        /* 4. 혹시 버튼이 안 보일 경우를 대비해 배경색 추가 (선택사항) */
+        /* 버튼 위치 확인용입니다. 나중에 색상은 빼셔도 됩니다. */
+        /*
+        [data-testid="stSidebarCollapsedControl"] button {
+            background-color: #f0f2f6 !important;
+            border-radius: 8px !important;
+        }
+        */
     </style>
 """, unsafe_allow_html=True)
-
 # ====== LAST: sidebar toggle rescue (must be the last CSS injected) ======
 st.markdown("""
 <style>
