@@ -2032,7 +2032,7 @@ def render_history_list(sb):
 
     # 비로그인은 select 불가(RLS)
     if not st.session_state.get("logged_in") and not admin_all:
-        st.sidebar.caption("로그인: 기록저장기능활성화")
+        st.sidebar.caption("로그인: 저장기능활성화")
         return
 
     hist = db_fetch_history(sb, limit=120)
