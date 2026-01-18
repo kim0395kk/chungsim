@@ -1,6 +1,8 @@
-streamlit>=1.32
-requests>=2.31
-groq>=0.9
-supabase>=2.3
-google-auth>=2.29
-pandas>=2.0
+streamlit>=1.28.0
+requests>=2.31.0
+pandas>=2.0.0
+supabase>=2.0.0
+google-cloud-aiplatform>=1.50.0
+google-generativeai>=0.3.0
+groq>=0.4.0
+plotly>=5.18.0
