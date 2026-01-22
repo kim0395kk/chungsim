@@ -1070,10 +1070,7 @@ class LLMService:
         for m_name in self.gemini_models:
             try:
                 model = genai.GenerativeModel(m_name)
-                response = model.generate_content(
-                    prompt, 
-                    generation_config=genai.types.GenerationConfig(temperature=0.7)
-                )
+                response = model.generate_content(prompt)
                 return (response.text or "").strip(), m_name
             except Exception as e:
                 last_error = e
