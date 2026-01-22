@@ -1072,7 +1072,7 @@ class LLMService:
                 model = genai.GenerativeModel(m_name)
                 response = model.generate_content(
                     prompt, 
-                    generation_config=genai.types.GenerationConfig(temperature=0.1)
+                    generation_config=genai.types.GenerationConfig(temperature=0.7)
                 )
                 return (response.text or "").strip(), m_name
             except Exception as e:
