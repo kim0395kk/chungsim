@@ -176,7 +176,7 @@ def render_header(title):
 # =========================================================
 # 2) STYLES  (✅ 여기 CSS/디자인은 네가 준 그대로. 변경 없음)
 # =========================================================
-st.set_page_config(layout="wide", page_title="AI 행정관 Pro - Govable AI", page_icon="⚖️")
+st.set_page_config(layout="wide", page_title="AI 행정관 Pro - Govable AI", page_icon="⚖️",initial_sidebar_state="expanded",)
 st.markdown(
     """
 <style>
@@ -506,6 +506,7 @@ st.markdown(
         border: none !important;
     }
     
+    /* Default Primary Button (Red - for Main Area) */
     .stButton > button[kind="primary"] {
         background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
         color: white !important;
@@ -551,6 +552,55 @@ st.markdown(
     
     .stButton > button[kind="primary"]:active {
         transform: scale(0.98) !important;
+    }
+
+    /* Sidebar Primary Button (White Glassmorphism - for New Chat) */
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: rgba(255, 255, 255, 0.7) !important;
+        color: #1f2937 !important;
+        border: 1px solid rgba(255, 255, 255, 0.8) !important;
+        border-radius: 16px !important;
+        padding: 0.9rem 2rem !important;
+        font-weight: 700 !important;
+        font-size: 1.1rem !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        backdrop-filter: blur(10px) !important;
+        -webkit-backdrop-filter: blur(10px) !important;
+        box-shadow: 
+            0 4px 6px -1px rgba(0, 0, 0, 0.1), 
+            0 2px 4px -1px rgba(0, 0, 0, 0.06),
+            inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+        position: relative !important;
+        overflow: hidden !important;
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"]::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.05);
+        transform: translate(-50%, -50%);
+        transition: width 0.6s, height 0.6s;
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover::before {
+        width: 400px;
+        height: 400px;
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+        transform: translateY(-2px) scale(1.01) !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+        box-shadow: 
+            0 10px 15px -3px rgba(0, 0, 0, 0.1), 
+            0 4px 6px -2px rgba(0, 0, 0, 0.05),
+            inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+        border-color: white !important;
+        color: black !important;
     }
     
 
@@ -875,23 +925,42 @@ def touch_session(sb):
 def log_event(sb, event_type: str, archive_id: Optional[str] = None, meta: Optional[dict] = None):
     if not sb:
         return
-    anon_id = ensure_anon_session_id()
-    user_email = st.session_state.get("user_email") if st.session_state.get("logged_in") else None
-    user_id = None
-    user = get_auth_user(sb)
-    if user and isinstance(user, dict):
-        user_id = user.get("id")
-
-    row = {
-        "event_type": event_type,
-        "archive_id": archive_id,
-        "user_id": user_id,
-        "user_email": user_email,
-        "anon_session_id": anon_id,
-        "meta": meta or {},
-    }
+    
     try:
+        # 1. 익명 ID 가져오기
+        anon_id = str(ensure_anon_session_id())
+
+        # 2. [핵심 수정] 출입증(헤더) 제출 (이게 없어서 에러가 났던 것)
+        sb.postgrest.headers.update({'x-session-id': anon_id})
+
+        # 3. 로그인 정보 확인 (하이브리드 체크)
+        user = get_auth_user(sb)
+        server_email = None
+        server_user_id = None
+
+        if user:
+            if isinstance(user, dict):
+                server_user_id = user.get("id")
+                server_email = user.get("email")
+            else:
+                server_user_id = getattr(user, "id", None)
+                server_email = getattr(user, "email", None)
+        
+        # 서버 조회 실패 시 세션 정보 사용
+        final_email = server_email if server_email else st.session_state.get("user_email")
+        final_user_id = server_user_id 
+
+        row = {
+            "event_type": event_type,
+            "archive_id": archive_id,
+            "user_id": final_user_id,
+            "user_email": final_email,
+            "anon_session_id": anon_id,
+            "meta": meta or {},
+        }
+        
         sb.table("app_events").insert(row).execute()
+        
     except Exception:
         pass
 
@@ -911,35 +980,51 @@ def log_api_call(
 ):
     """
     개별 API 호출 기록 (법령API, 네이버검색, LLM 등)
-    api_type: 'law_api', 'naver_search', 'llm_vertex', 'llm_gemini', 'llm_groq'
     """
     if not sb:
         return
-    user_email = st.session_state.get("user_email") if st.session_state.get("logged_in") else None
-    
-    # archive_id가 없으면 현재 세션의 archive_id 사용 시도
-    if not archive_id:
-        archive_id = st.session_state.get("current_archive_id")
-    
-    row = {
-        "archive_id": archive_id,
-        "user_email": user_email,
-        "api_type": api_type,
-        "model_name": model_name,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": input_tokens + output_tokens,
-        "latency_ms": latency_ms,
-        "success": success,
-        "error_message": error_message[:500] if error_message else None,
-        "request_summary": request_summary[:200] if request_summary else None,
-        "response_summary": response_summary[:200] if response_summary else None,
-    }
-    try:
-        sb.table("api_call_logs").insert(row).execute()
-    except Exception:
-        pass  # 로깅 실패해도 앱 동작에 영향 주지 않음
 
+    try:
+        # 1. 익명 ID 가져오기
+        anon_id = str(ensure_anon_session_id())
+
+        # 2. [핵심 수정] 여기도 출입증(헤더) 제출 필수!
+        sb.postgrest.headers.update({'x-session-id': anon_id})
+
+        # 3. 로그인 정보 확인
+        user = get_auth_user(sb)
+        server_email = None
+        if user:
+            if isinstance(user, dict):
+                server_email = user.get("email")
+            else:
+                server_email = getattr(user, "email", None)
+        
+        final_email = server_email if server_email else st.session_state.get("user_email")
+        
+        if not archive_id:
+            archive_id = st.session_state.get("current_archive_id")
+        
+        row = {
+            "archive_id": archive_id,
+            "user_email": final_email,
+            "anon_session_id": anon_id,
+            "api_type": api_type,
+            "model_name": model_name,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "latency_ms": latency_ms,
+            "success": success,
+            "error_message": error_message[:500] if error_message else None,
+            "request_summary": request_summary[:200] if request_summary else None,
+            "response_summary": response_summary[:200] if response_summary else None,
+        }
+
+        sb.table("api_call_logs").insert(row).execute()
+
+    except Exception:
+        pass
 
 class LLMService:
     """Vertex AI 기반 LLM 서비스 (Gemini API 및 Groq 폴백 지원)"""
@@ -1757,25 +1842,49 @@ def run_workflow(user_input: str, log_placeholder, mode: str = "신속") -> dict
 
 
 # =========================================================
-# 5) DB OPS
+# 5) DB OPS (HYBRID CHECK VERSION)
 # =========================================================
 def db_insert_archive(sb, prompt: str, payload: dict) -> Optional[str]:
-    archive_id = str(uuid.uuid4())            # ✅ 먼저 만든다
-    anon_id = str(ensure_anon_session_id())   # ✅ text 컬럼이니 무조건 str
+    archive_id = str(uuid.uuid4())
+    anon_id = str(ensure_anon_session_id())
 
+    # ---------------------------------------------------------
+    # [최종 수정] 서버(sb)와 메모장(session)을 모두 뒤져서 이메일 찾아냄
+    # ---------------------------------------------------------
+    # 1. 서버(Supabase)에게 먼저 물어봄
     user = get_auth_user(sb)
-    user_id = user.get("id") if isinstance(user, dict) else None
-    user_email = st.session_state.get("user_email") if st.session_state.get("logged_in") else None
+    server_email = None
+    server_user_id = None
+
+    if user:
+        if isinstance(user, dict):
+             server_user_id = user.get("id")
+             server_email = user.get("email")
+        else:
+             server_user_id = getattr(user, "id", None)
+             server_email = getattr(user, "email", None)
+
+    # 2. 메모장(Session State)도 확인 (로그인 직후 서버가 느릴 때 대비)
+    session_email = st.session_state.get("user_email")
+    
+    # 3. [판결] 둘 중 하나라도 이메일이 있으면 그것을 사용
+    # (서버에서 가져온 게 있으면 우선 사용, 없으면 세션 정보 사용)
+    final_email = server_email if server_email else session_email
+    final_user_id = server_user_id # ID는 없어도 RLS 작동엔 문제 없음
+    
+    # ---------------------------------------------------------
 
     row = {
-        "id": archive_id,  # ✅ 핵심
+        "id": archive_id,
         "prompt": prompt,
         "payload": payload,
         "anon_session_id": anon_id,
-        "user_id": user_id if st.session_state.get("logged_in") else None,
-        "user_email": (user_email.strip() if user_email else None),
+        "user_id": final_user_id,
+        
+        # ★ [핵심] 찾아낸 최종 이메일을 넣음
+        "user_email": (final_email.strip() if final_email else None),
+        
         "client_meta": {"app_ver": APP_VERSION},
-
         "app_mode": payload.get("app_mode", st.session_state.get("app_mode", "신속")),
         "search_count": int(payload.get("search_count") or 0),
         "execution_time": float(payload.get("execution_time") or 0.0),
@@ -1784,14 +1893,19 @@ def db_insert_archive(sb, prompt: str, payload: dict) -> Optional[str]:
     }
 
     try:
+        # 헤더 전송
+        sb.postgrest.headers.update({'x-session-id': anon_id})
         sb.table("work_archive").insert(row).execute()
-        return archive_id  # ✅ 응답 data 없어도 OK
+        return archive_id
     except Exception as e:
         st.warning(f"ℹ️ DB 저장 실패: {e}")
         return None
 
 
 def db_fetch_history(sb, limit: int = 80) -> List[dict]:
+    anon_id = str(ensure_anon_session_id())
+    sb.postgrest.headers.update({'x-session-id': anon_id})
+
     try:
         q = (
             sb.table("work_archive")
@@ -1805,6 +1919,9 @@ def db_fetch_history(sb, limit: int = 80) -> List[dict]:
         return []
 
 def db_fetch_payload(sb, archive_id: str) -> Optional[dict]:
+    anon_id = str(ensure_anon_session_id())
+    sb.postgrest.headers.update({'x-session-id': anon_id})
+
     try:
         resp = (
             sb.table("work_archive")
@@ -1821,6 +1938,9 @@ def db_fetch_payload(sb, archive_id: str) -> Optional[dict]:
     return None
 
 def db_fetch_followups(sb, archive_id: str) -> List[dict]:
+    anon_id = str(ensure_anon_session_id())
+    sb.postgrest.headers.update({'x-session-id': anon_id})
+
     try:
         resp = (
             sb.table("work_followups")
@@ -1834,21 +1954,36 @@ def db_fetch_followups(sb, archive_id: str) -> List[dict]:
         return []
 
 def db_insert_followup(sb, archive_id: str, turn: int, role: str, content: str):
-    anon_id = str(ensure_anon_session_id())  # ✅
+    anon_id = str(ensure_anon_session_id())
+    
+    # [수정] 후속 질문도 동일하게 양쪽 확인
     user = get_auth_user(sb)
-    user_id = user.get("id") if isinstance(user, dict) else None
-    user_email = st.session_state.get("user_email") if st.session_state.get("logged_in") else None
+    server_email = None
+    server_user_id = None
+
+    if user:
+        if isinstance(user, dict):
+             server_user_id = user.get("id")
+             server_email = user.get("email")
+        else:
+             server_user_id = getattr(user, "id", None)
+             server_email = getattr(user, "email", None)
+    
+    session_email = st.session_state.get("user_email")
+    final_email = server_email if server_email else session_email
+    final_user_id = server_user_id
 
     row = {
         "archive_id": archive_id,
         "turn": turn,
         "role": role,
         "content": content,
-        "user_id": user_id if st.session_state.get("logged_in") else None,
-        "user_email": user_email if st.session_state.get("logged_in") else None,
+        "user_id": final_user_id,
+        "user_email": (final_email.strip() if final_email else None),
         "anon_session_id": anon_id,
     }
     try:
+        sb.postgrest.headers.update({'x-session-id': anon_id})
         sb.table("work_followups").insert(row).execute()
     except Exception:
         pass
@@ -2034,6 +2169,14 @@ def render_history_list(sb):
     if not st.session_state.get("logged_in") and not admin_all:
         st.sidebar.caption("로그인: 저장기능활성화")
         return
+
+    # 새 채팅 버튼 (로그인 유저용)
+    if st.sidebar.button("➕ 새 채팅 시작", use_container_width=True, type="primary"):
+        st.session_state.pop("workflow_result", None)
+        st.session_state.pop("current_archive_id", None)
+        st.session_state.pop("followup_messages", None)
+        st.session_state.pop("selected_history_id", None)
+        st.rerun()
 
     hist = db_fetch_history(sb, limit=120)
     if not hist:
