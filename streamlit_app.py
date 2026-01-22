@@ -1031,7 +1031,7 @@ class LLMService:
         
         # 2. 사용할 모델 설정
         self.gemini_models = [
-            "gemini-2.5-flash",       # 속도/가성비 최우선
+            "gemini-2.5-flash-lite",       # 속도/가성비 최우선
             "gemini-2.5-flash-lite",   # 최신 실험적 모델
             "gemini-1.5-pro",         # 고성능
         ]
