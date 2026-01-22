@@ -2184,7 +2184,7 @@ def render_master_dashboard(sb):
     with st.spinner("📊 데이터 및 분석 뷰 로드 중..."):
         # (1) 기본 테이블 데이터
         data = admin_fetch_work_archive(sb, limit=5000)
-        sessions = admin_fetch_sessions(sb, minutes=5)
+        sessions = admin_fetch_sessions(sb, minutes=1440)
         events = admin_fetch_events(sb, limit=200)
         
         # (2) 분석 뷰(View) 데이터 (에러 방지 처리)
