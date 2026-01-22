@@ -2121,7 +2121,7 @@ def render_history_list(sb):
 
 
 # =========================================================
-# 8) ADMIN DASHBOARD
+# 8) ADMIN DASHBOARD (UPDATED)
 # =========================================================
 def admin_fetch_work_archive(sb, limit: int = 2000) -> List[dict]:
     try:
@@ -2167,7 +2167,7 @@ def admin_fetch_events(sb, limit: int = 300) -> List[dict]:
         return []
 
 def render_master_dashboard(sb):
-    """Google-style BI 대시보드 with 드릴다운 필터, 비용 분석, 상세 감사로그"""
+    """Google-style BI 대시보드 with DAU, Peak Time, Duration Views"""
     st.markdown("## 🏛️ 관리자 운영 마스터 콘솔")
 
     if not is_admin_user(st.session_state.get("user_email", "")):
@@ -2179,12 +2179,30 @@ def render_master_dashboard(sb):
         return
 
     # ─────────────────────────────────────────────────────────
-    # 데이터 로드
+    # 1. 데이터 로드 (Views & Tables)
     # ─────────────────────────────────────────────────────────
     with st.spinner("📊 데이터 로드 중..."):
+        # (1) 기본 로그 데이터
         data = admin_fetch_work_archive(sb, limit=5000)
         sessions = admin_fetch_sessions(sb, minutes=5)
         events = admin_fetch_events(sb, limit=200)
+        
+        # (2) 아까 만든 분석 뷰(View) 데이터 가져오기
+        # View가 없거나 에러가 나도 대시보드가 멈추지 않도록 예외처리
+        try:
+            res_dau = sb.table("view_analytics_dau").select("*").execute()
+            df_dau = pd.DataFrame(res_dau.data) if res_dau.data else pd.DataFrame()
+        except: df_dau = pd.DataFrame()
+
+        try:
+            res_peak = sb.table("view_analytics_peak_hours").select("*").execute()
+            df_peak = pd.DataFrame(res_peak.data) if res_peak.data else pd.DataFrame()
+        except: df_peak = pd.DataFrame()
+
+        try:
+            res_dur = sb.table("view_analytics_duration").select("*").execute()
+            dur_data = res_dur.data[0] if res_dur.data else {"avg_duration_min": 0, "max_duration_min": 0}
+        except: dur_data = {"avg_duration_min": 0, "max_duration_min": 0}
 
     if not pd:
         st.error("pandas가 설치되어 있지 않습니다.")
@@ -2192,284 +2210,198 @@ def render_master_dashboard(sb):
 
     if not data:
         st.info("표시할 데이터가 없습니다.")
-        return
+        # 데이터가 없더라도 View 그래프는 보여줄 수 있으므로 return 하지 않음
 
     # ─────────────────────────────────────────────────────────
-    # DataFrame 준비 및 비용 계산
+    # 2. DataFrame 가공 (비용 계산 등)
     # ─────────────────────────────────────────────────────────
     df = pd.DataFrame(data)
-    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
-    df["date"] = df["created_at"].dt.date
-    df["hour"] = df["created_at"].dt.hour
-    df["weekday"] = df["created_at"].dt.day_name()
-    df["user_email"] = df["user_email"].fillna("(anon)")
-    df["app_mode"] = df["app_mode"].fillna("신속")
-    df["model_used"] = df["model_used"].fillna("(unknown)")
-    df["token_usage"] = pd.to_numeric(df["token_usage"], errors="coerce").fillna(0).astype(int)
-    df["execution_time"] = pd.to_numeric(df["execution_time"], errors="coerce").fillna(0)
-    df["search_count"] = pd.to_numeric(df["search_count"], errors="coerce").fillna(0).astype(int)
-    df["prompt"] = df["prompt"].fillna("")
+    if not df.empty:
+        df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
+        df["date"] = df["created_at"].dt.date
+        df["hour"] = df["created_at"].dt.hour
+        df["weekday"] = df["created_at"].dt.day_name()
+        df["user_email"] = df["user_email"].fillna("(anon)")
+        df["app_mode"] = df["app_mode"].fillna("신속")
+        df["model_used"] = df["model_used"].fillna("(unknown)")
+        df["token_usage"] = pd.to_numeric(df["token_usage"], errors="coerce").fillna(0).astype(int)
+        df["execution_time"] = pd.to_numeric(df["execution_time"], errors="coerce").fillna(0)
+        df["search_count"] = pd.to_numeric(df["search_count"], errors="coerce").fillna(0).astype(int)
+        df["prompt"] = df["prompt"].fillna("")
 
-    # 비용 계산
-    def calc_cost(row):
-        model = row["model_used"]
-        tokens = row["token_usage"]
-        rate = MODEL_PRICING.get(model, MODEL_PRICING.get("(unknown)", 0.10))
-        return (tokens / 1_000_000) * rate
-
-    df["cost_usd"] = df.apply(calc_cost, axis=1)
-
-    # Heavy user 임계값 계산
-    user_run_counts = df["user_email"].value_counts()
-    heavy_threshold = user_run_counts.quantile(HEAVY_USER_PERCENTILE / 100) if len(user_run_counts) > 1 else 999999
-    heavy_users = set(user_run_counts[user_run_counts >= heavy_threshold].index)
+        # 비용 계산
+        def calc_cost(row):
+            model = row["model_used"]
+            tokens = row["token_usage"]
+            rate = MODEL_PRICING.get(model, MODEL_PRICING.get("(unknown)", 0.10))
+            return (tokens / 1_000_000) * rate
+        
+        df["cost_usd"] = df.apply(calc_cost, axis=1)
+        
+        # Heavy user 임계값 계산
+        user_run_counts = df["user_email"].value_counts()
+        heavy_threshold = user_run_counts.quantile(HEAVY_USER_PERCENTILE / 100) if len(user_run_counts) > 1 else 999999
+        heavy_users = set(user_run_counts[user_run_counts >= heavy_threshold].index)
+    else:
+        # 데이터 없을 때 빈값 처리
+        df["cost_usd"] = 0.0
+        df["token_usage"] = 0
+        heavy_users = set()
 
     # ─────────────────────────────────────────────────────────
-    # 🔍 드릴다운 필터 바
+    # 3. 👥 사용자 활동 지표 (User Engagement) - ★ 여기가 추가된 부분 ★
     # ─────────────────────────────────────────────────────────
-    st.markdown("### 🔍 필터")
+    st.subheader("👥 사용자 활동 분석 (User Engagement)")
+    
+    # 상단 메트릭 카드
+    m1, m2, m3, m4 = st.columns(4)
+    
+    # 오늘 접속자 (DAU 데이터에서 오늘 날짜 찾기)
+    today_dau = 0
+    if not df_dau.empty:
+        # DB에서 date 컬럼이 문자열로 올 수 있으므로 처리
+        df_dau['date'] = pd.to_datetime(df_dau['date']).dt.date
+        today = datetime.utcnow().date() # 한국 시간 고려 필요시 수정 (View에서 이미 처리됨)
+        today_row = df_dau[df_dau['date'] == today]
+        if not today_row.empty:
+            today_dau = today_row.iloc[0]['session_count']
+        else:
+            # 오늘 날짜가 없으면 가장 최근 데이터라도 표시 (선택사항)
+            pass
+
+    m1.metric("오늘 방문자 수 (DAU)", f"{today_dau}명")
+    m2.metric("현재 접속 중", f"{len(sessions)}명")
+    m3.metric("평균 체류 시간", f"{dur_data.get('avg_duration_min', 0)}분")
+    m4.metric("최대 집중 시간", f"{dur_data.get('max_duration_min', 0)}분")
+
+    st.divider()
+
+    # 그래프 배치
+    col_g1, col_g2 = st.columns(2)
+
+    with col_g1:
+        st.markdown("##### 📉 일별 활성 사용자 추이")
+        if not df_dau.empty:
+            df_dau_chart = df_dau.set_index('date')
+            st.line_chart(df_dau_chart[['session_count']], height=250)
+        else:
+            st.info("데이터가 부족합니다.")
+
+    with col_g2:
+        st.markdown("##### ⏰ 시간대별 접속 분포 (Peak Time)")
+        if not df_peak.empty:
+            df_peak_chart = df_peak.set_index('hour')
+            st.bar_chart(df_peak_chart[['visit_count']], height=250)
+        else:
+            st.info("데이터가 부족합니다.")
+
+    st.divider()
+
+    # ─────────────────────────────────────────────────────────
+    # 4. 💰 비용 및 필터 (기존 로직)
+    # ─────────────────────────────────────────────────────────
+    # 필터 바
+    st.markdown("### 🔍 상세 로그 필터")
     filter_cols = st.columns([2, 2, 2, 1])
 
     with filter_cols[0]:
-        all_users = ["(전체)"] + sorted(df["user_email"].unique().tolist())
+        all_users = ["(전체)"] + sorted(df["user_email"].unique().tolist()) if not df.empty else ["(전체)"]
         selected_user = st.selectbox("👤 사용자", all_users, index=0)
 
     with filter_cols[1]:
         min_date = df["date"].min() if not df.empty else datetime.now().date()
         max_date = df["date"].max() if not df.empty else datetime.now().date()
-        date_range = st.date_input(
-            "📅 날짜 범위",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date,
-        )
+        date_range = st.date_input("📅 날짜 범위", value=(min_date, max_date), min_value=min_date, max_value=max_date)
 
     with filter_cols[2]:
-        all_models = sorted(df["model_used"].unique().tolist())
+        all_models = sorted(df["model_used"].unique().tolist()) if not df.empty else []
         selected_models = st.multiselect("🤖 모델", all_models, default=all_models)
 
     with filter_cols[3]:
+        st.write("") # Spacer
         apply_filter = st.button("적용", use_container_width=True, type="primary")
 
-    # 필터 적용
+    # 필터링 적용
     filtered_df = df.copy()
-    if selected_user != "(전체)":
-        filtered_df = filtered_df[filtered_df["user_email"] == selected_user]
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        filtered_df = filtered_df[
-            (filtered_df["date"] >= date_range[0]) & (filtered_df["date"] <= date_range[1])
-        ]
-    if selected_models:
-        filtered_df = filtered_df[filtered_df["model_used"].isin(selected_models)]
+    if not filtered_df.empty:
+        if selected_user != "(전체)":
+            filtered_df = filtered_df[filtered_df["user_email"] == selected_user]
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            filtered_df = filtered_df[(filtered_df["date"] >= date_range[0]) & (filtered_df["date"] <= date_range[1])]
+        if selected_models:
+            filtered_df = filtered_df[filtered_df["model_used"].isin(selected_models)]
 
     st.divider()
 
-    # ─────────────────────────────────────────────────────────
-    # 📊 KPI 카드 (Google 스타일)
-    # ─────────────────────────────────────────────────────────
-    total_runs = len(filtered_df)
-    total_tokens = int(filtered_df["token_usage"].sum())
-    total_cost = filtered_df["cost_usd"].sum()
-    cost_per_run = total_cost / total_runs if total_runs > 0 else 0.0
-    avg_latency = filtered_df["execution_time"].mean() if total_runs > 0 else 0.0
-    total_search = int(filtered_df["search_count"].sum())
-    search_per_run = total_search / total_runs if total_runs > 0 else 0.0
-    online_now = len(sessions)
-
-    kpi_cols = st.columns(6)
-    kpi_cols[0].metric("🟢 현재 접속", f"{online_now}")
-    kpi_cols[1].metric("📦 총 실행", f"{total_runs:,}")
-    kpi_cols[2].metric("🧾 총 토큰", f"{total_tokens:,}")
-    kpi_cols[3].metric("💵 총 비용", f"${total_cost:.4f}")
-    kpi_cols[4].metric("💰 회당 비용", f"${cost_per_run:.6f}")
-    kpi_cols[5].metric("⏱️ 평균 지연", f"{avg_latency:.2f}s")
-
+    # KPI Summary
+    total_cost = filtered_df["cost_usd"].sum() if not filtered_df.empty else 0
+    total_tokens = filtered_df["token_usage"].sum() if not filtered_df.empty else 0
+    
+    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1.metric("💰 선택 기간 비용", f"${total_cost:.4f}")
+    kpi2.metric("🧾 사용 토큰", f"{total_tokens:,}")
+    kpi3.metric("📦 실행 횟수", f"{len(filtered_df):,}건")
+    
     st.divider()
 
-    # ─────────────────────────────────────────────────────────
-    # 📈 차트 섹션
-    # ─────────────────────────────────────────────────────────
-    chart_tabs = st.tabs(["📈 토큰/비용", "🤖 모델 분석", "🔥 지연 히트맵", "👤 사용자 분석"])
-
-    with chart_tabs[0]:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("📈 일별 토큰 사용량")
-            tok_daily = filtered_df.groupby("date")["token_usage"].sum().sort_index()
-            st.line_chart(tok_daily)
-        with col2:
-            st.subheader("💵 일별 비용 ($)")
-            cost_daily = filtered_df.groupby("date")["cost_usd"].sum().sort_index()
-            st.area_chart(cost_daily)
-
-    with chart_tabs[1]:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("🤖 모델별 사용 횟수")
-            model_counts = filtered_df["model_used"].value_counts()
-            st.bar_chart(model_counts)
-        with col2:
-            st.subheader("💵 모델별 비용")
-            model_cost = filtered_df.groupby("model_used")["cost_usd"].sum().sort_values(ascending=False)
-            st.bar_chart(model_cost)
-
-    with chart_tabs[2]:
-        st.subheader("🔥 시간대별 지연 히트맵")
-        try:
-            import plotly.express as px
-            heatmap_data = filtered_df.groupby(["weekday", "hour"])["execution_time"].mean().unstack(fill_value=0)
-            weekday_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-            heatmap_data = heatmap_data.reindex([w for w in weekday_order if w in heatmap_data.index])
+    # 상세 로그 테이블
+    st.subheader("📋 상세 감사 로그")
+    if not filtered_df.empty:
+        display_df = filtered_df[["created_at", "user_email", "prompt", "model_used", "token_usage", "cost_usd", "execution_time", "id"]].copy()
+        display_df["created_at"] = display_df["created_at"].dt.strftime("%Y-%m-%d %H:%M")
+        display_df = display_df.sort_values("created_at", ascending=False).head(100)
+        
+        # 스타일링 함수 (Heavy User 등)
+        def highlight_rows(row):
+            styles = [""] * len(row)
+            user = row["user_email"]
+            try: exec_time = float(row["execution_time"])
+            except: exec_time = 0
             
-            fig = px.imshow(
-                heatmap_data,
-                labels=dict(x="시간", y="요일", color="평균 지연(s)"),
-                x=heatmap_data.columns,
-                y=heatmap_data.index,
-                color_continuous_scale="RdYlGn_r",
-                aspect="auto",
-            )
-            fig.update_layout(height=300)
-            st.plotly_chart(fig, use_container_width=True)
-        except ImportError:
-            st.info("plotly가 설치되어 있지 않아 히트맵을 표시할 수 없습니다. `pip install plotly`")
-            # 대체: 간단한 테이블
-            latency_by_hour = filtered_df.groupby("hour")["execution_time"].mean()
-            st.bar_chart(latency_by_hour)
+            if user in heavy_users:
+                styles = ["background-color: #fef3c7"] * len(row)
+            if exec_time > LONG_LATENCY_THRESHOLD:
+                styles = ["background-color: #fee2e2; color: #991b1b; font-weight: bold"] * len(row)
+            return styles
 
-    with chart_tabs[3]:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("👤 사용자별 실행 Top 10")
-            user_counts = filtered_df["user_email"].value_counts().head(10)
-            st.bar_chart(user_counts)
-        with col2:
-            st.subheader("💵 사용자별 비용 Top 10")
-            user_cost = filtered_df.groupby("user_email")["cost_usd"].sum().sort_values(ascending=False).head(10)
-            st.bar_chart(user_cost)
-
-    st.divider()
+        st.dataframe(display_df.style.apply(highlight_rows, axis=1), use_container_width=True, height=400)
+    else:
+        st.info("조건에 맞는 데이터가 없습니다.")
 
     # ─────────────────────────────────────────────────────────
-    # 📋 상세 감사 로그 테이블
-    # ─────────────────────────────────────────────────────────
-    st.subheader("📋 상세 감사 로그 (Audit Trail)")
-
-    # 표시용 DataFrame 준비
-    display_df = filtered_df[["created_at", "user_email", "prompt", "model_used", "token_usage", "cost_usd", "execution_time", "id"]].copy()
-    display_df = display_df.sort_values("created_at", ascending=False).head(100)
-    display_df["created_at"] = display_df["created_at"].dt.strftime("%Y-%m-%d %H:%M")
-    display_df["prompt_short"] = display_df["prompt"].apply(lambda x: x[:40] + "..." if len(x) > 40 else x)
-    display_df["cost_usd"] = display_df["cost_usd"].apply(lambda x: f"${x:.6f}")
-    display_df["execution_time"] = display_df["execution_time"].apply(lambda x: f"{x:.1f}s")
-
-    # 하이라이트 조건
-    def highlight_rows(row):
-        styles = [""] * len(row)
-        user = row["user_email"]
-        exec_time = float(row["execution_time"].replace("s", ""))
-        
-        # Heavy user: 노란색 배경
-        if user in heavy_users:
-            styles = ["background-color: #fef3c7"] * len(row)
-        
-        # Long latency: 빨간색 배경
-        if exec_time > LONG_LATENCY_THRESHOLD:
-            styles = ["background-color: #fee2e2; color: #991b1b; font-weight: bold"] * len(row)
-        
-        return styles
-
-    styled_df = display_df[["created_at", "user_email", "prompt_short", "model_used", "token_usage", "cost_usd", "execution_time"]].rename(columns={
-        "created_at": "📅 일시",
-        "user_email": "👤 사용자",
-        "prompt_short": "📝 지시(요약)",
-        "model_used": "🤖 모델",
-        "token_usage": "🧾 토큰",
-        "cost_usd": "💵 비용",
-        "execution_time": "⏱️ 지연",
-    })
-
-    try:
-        st.dataframe(
-            styled_df.style.apply(highlight_rows, axis=1),
-            use_container_width=True,
-            height=400,
-        )
-    except Exception:
-        st.dataframe(styled_df, use_container_width=True, height=400)
-
-    st.caption("🟡 노란색: 과다 사용자 (상위 5%)  |  🔴 빨간색: 장시간 지연 (120초 초과)")
-
-    # 프롬프트 상세 보기
-    with st.expander("🔍 프롬프트 상세 보기 (클릭해서 전체 내용 확인)"):
-        prompt_id = st.selectbox(
-            "로그 선택 (최근 100개)",
-            options=display_df["id"].tolist(),
-            format_func=lambda x: f"{display_df[display_df['id'] == x]['created_at'].values[0]} - {display_df[display_df['id'] == x]['prompt_short'].values[0]}",
-        )
-        if prompt_id:
-            full_prompt = filtered_df[filtered_df["id"] == prompt_id]["prompt"].values
-            if len(full_prompt) > 0:
-                st.text_area("전체 프롬프트", full_prompt[0], height=200, disabled=True)
-
-    st.divider()
-
-    # ─────────────────────────────────────────────────────────
-    # 📥 데이터 내보내기 & 관리
+    # 5. 📥 데이터 관리 (내보내기/삭제)
     # ─────────────────────────────────────────────────────────
     col1, col2 = st.columns(2)
-    
     with col1:
         st.subheader("📥 데이터 내보내기")
-        export_df = filtered_df.copy()
-        export_df["created_at"] = export_df["created_at"].dt.strftime("%Y-%m-%d %H:%M:%S")
-        csv = export_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "💾 CSV 다운로드 (필터 적용)",
-            data=csv,
-            file_name=f"work_archive_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-
+        if not filtered_df.empty:
+            csv = filtered_df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("💾 CSV 다운로드", data=csv, file_name="log_export.csv", mime="text/csv")
+            
     with col2:
-        st.subheader("🗑️ 기록 삭제")
-        if data:
-            ids = [r["id"] for r in data if r.get("id")]
-            sel = st.selectbox("삭제할 ID", options=ids[:20], index=0)
-            confirm = st.checkbox("삭제 확인")
-            if st.button("❌ 삭제", type="primary") and confirm:
+        st.subheader("🗑️ 데이터 삭제")
+        if not filtered_df.empty:
+            sel_id = st.selectbox("삭제할 ID 선택", filtered_df["id"].head(20).tolist())
+            if st.button("❌ 삭제 실행", type="primary"):
                 try:
-                    sb.table("work_archive").delete().eq("id", sel).execute()
-                    log_event(sb, "admin_delete_archive", archive_id=sel)
-                    st.success("삭제 완료")
+                    sb.table("work_archive").delete().eq("id", sel_id).execute()
+                    st.success("삭제되었습니다.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"삭제 실패: {e}")
 
+    # ─────────────────────────────────────────────────────────
+    # 6. 하단 탭 (세션/이벤트 원본)
+    # ─────────────────────────────────────────────────────────
     st.divider()
-
-    # ─────────────────────────────────────────────────────────
-    # 🟢 세션 & 이벤트 로그
-    # ─────────────────────────────────────────────────────────
-    session_tabs = st.tabs(["🟢 현재 세션", "🧾 이벤트 로그"])
-
+    session_tabs = st.tabs(["🟢 세션 목록", "🧾 이벤트 원본"])
     with session_tabs[0]:
-        if sessions:
-            st.write(f"최근 5분 내 활성 세션: **{len(sessions)}**")
-            st.dataframe(sessions, use_container_width=True)
-        else:
-            st.caption("최근 5분 내 활성 세션이 없습니다.")
-
+        st.dataframe(sessions, use_container_width=True)
     with session_tabs[1]:
-        if events:
-            st.dataframe(events, use_container_width=True, height=300)
-        else:
-            st.caption("이벤트 로그가 없습니다.")
-
+        st.dataframe(events, use_container_width=True)
 
 def render_lawbot_button(url: str):
-    st.markdown(
+    st.markdown( 
         f"""
 <a href="{_escape(url)}" target="_blank" class="lawbot-btn">
   <div style="font-size: 1.5rem; font-weight: 800; margin-bottom: 0.4rem; color: #FFD700; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
@@ -2481,7 +2413,7 @@ def render_lawbot_button(url: str):
 </a>
 """,
         unsafe_allow_html=True,
-    )
+    ) 
 
 
 # =========================================================
