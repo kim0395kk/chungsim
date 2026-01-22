@@ -2418,7 +2418,7 @@ def render_master_dashboard(sb):
         st.caption("🟡 노란색: 과다 사용자 (상위 5%)  |  🔴 빨간색: 장시간 지연 (120초 초과)")
         
         with st.expander("🔍 프롬프트 원문 보기"):
-                        sel_id = st.selectbox("로그 선택", display_df["id"].tolist(), format_func=lambda x: f"ID: {x}")
+            sel_id = st.selectbox("로그 선택", display_df["id"].tolist(), format_func=lambda x: f"ID: {x}")
             if sel_id:
                 txt = filtered_df[filtered_df["id"]==sel_id]["prompt"].values[0]
                 st.text_area("내용", txt, height=150)
