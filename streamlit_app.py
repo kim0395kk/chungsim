@@ -2121,7 +2121,7 @@ def render_history_list(sb):
 
 
 # =========================================================
-# 8) ADMIN DASHBOARD (FINAL FIX)
+# 8) ADMIN DASHBOARD (FINAL FIX: Direct Count)
 # =========================================================
 def admin_fetch_work_archive(sb, limit: int = 5000) -> List[dict]:
     try:
@@ -2138,10 +2138,7 @@ def admin_fetch_work_archive(sb, limit: int = 5000) -> List[dict]:
         return []
 
 def admin_fetch_sessions(sb, minutes: int = 10) -> List[dict]:
-    """
-    ✅ 수정됨: minutes=10
-    최근 10분 이내에 활동한 세션만 가져옵니다. (실시간 접속자용)
-    """
+    """실시간 접속자 (최근 10분)"""
     try:
         cutoff = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
         resp = (
@@ -2170,13 +2167,33 @@ def admin_fetch_events(sb, limit: int = 300) -> List[dict]:
         st.error(f"관리자 조회 실패(app_events): {e}")
         return []
 
+# ─────────────────────────────────────────────────────────
+# ★ [핵심] 뷰(View) 대신 직접 세는 함수들 (가장 정확함)
+# ─────────────────────────────────────────────────────────
 def admin_get_total_visits(sb) -> int:
-    """누적 방문수(Total Visits) 카운트"""
+    """누적 방문수 (전체 행 개수)"""
     try:
         res = sb.table("app_sessions").select("*", count="exact", head=True).execute()
         return res.count if res.count is not None else 0
-    except Exception:
-        return 0
+    except: return 0
+
+def admin_get_today_visitors(sb) -> int:
+    """오늘 방문자 (한국시간 00:00 이후 생성된 세션 수)"""
+    try:
+        # 한국 시간 기준 '오늘 0시' 계산
+        now_kst = datetime.utcnow() + timedelta(hours=9)
+        today_start_kst = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+        # DB 쿼리용 UTC 변환 (한국 0시 = 전날 15시 UTC)
+        today_start_utc = today_start_kst - timedelta(hours=9)
+        cutoff = today_start_utc.isoformat() + "Z"
+        
+        # created_at이 오늘 0시 이후인 것만 카운트
+        res = sb.table("app_sessions")\
+            .select("*", count="exact", head=True)\
+            .gte("created_at", cutoff)\
+            .execute()
+        return res.count if res.count is not None else 0
+    except: return 0
 
 def render_master_dashboard(sb):
     st.markdown("## 🏛️ 관리자 운영 마스터 콘솔")
@@ -2190,17 +2207,16 @@ def render_master_dashboard(sb):
         return
 
     # 1. 데이터 로드
-    with st.spinner("📊 데이터 및 분석 뷰 로드 중..."):
+    with st.spinner("📊 데이터 분석 중..."):
         data = admin_fetch_work_archive(sb, limit=5000)
-        sessions = admin_fetch_sessions(sb, minutes=10) # 실시간 (10분)
+        sessions = admin_fetch_sessions(sb, minutes=10) # 실시간
         events = admin_fetch_events(sb, limit=200)
         
-        # View 데이터 로드 (에러 방지)
-        try:
-            res_dau = sb.table("view_analytics_dau").select("*").execute()
-            df_dau = pd.DataFrame(res_dau.data) if res_dau.data else pd.DataFrame()
-        except: df_dau = pd.DataFrame()
+        # ★ 직접 카운트 함수 호출
+        total_visits = admin_get_total_visits(sb)
+        today_visitors = admin_get_today_visitors(sb)
 
+        # 뷰 데이터 (그래프용 - 에러나도 무시)
         try:
             res_peak = sb.table("view_analytics_peak_hours").select("*").execute()
             df_peak = pd.DataFrame(res_peak.data) if res_peak.data else pd.DataFrame()
@@ -2212,7 +2228,7 @@ def render_master_dashboard(sb):
         except: dur_data = {"avg_duration_min": 0, "max_duration_min": 0}
 
     if not pd:
-        st.error("pandas가 설치되어 있지 않습니다.")
+        st.error("pandas 모듈 없음")
         return
 
     # 2. DataFrame 가공
@@ -2223,19 +2239,15 @@ def render_master_dashboard(sb):
         df["hour"] = df["created_at"].dt.hour
         df["weekday"] = df["created_at"].dt.day_name()
         df["user_email"] = df["user_email"].fillna("(anon)")
-        df["app_mode"] = df["app_mode"].fillna("신속")
         df["model_used"] = df["model_used"].fillna("(unknown)")
         df["token_usage"] = pd.to_numeric(df["token_usage"], errors="coerce").fillna(0).astype(int)
         df["execution_time"] = pd.to_numeric(df["execution_time"], errors="coerce").fillna(0)
-        df["search_count"] = pd.to_numeric(df["search_count"], errors="coerce").fillna(0).astype(int)
-        df["prompt"] = df["prompt"].fillna("")
-
+        
         def calc_cost(row):
             model = row["model_used"]
             tokens = row["token_usage"]
             rate = MODEL_PRICING.get(model, MODEL_PRICING.get("(unknown)", 0.10))
             return (tokens / 1_000_000) * rate
-        
         df["cost_usd"] = df.apply(calc_cost, axis=1)
 
         user_run_counts = df["user_email"].value_counts()
@@ -2245,48 +2257,50 @@ def render_master_dashboard(sb):
         df["cost_usd"] = 0.0
         heavy_users = set()
 
-    # 3. 사용자 활동 지표 (수정된 부분)
+    # 3. 사용자 활동 지표
     st.subheader("👥 사용자 활동 분석 (Engagement)")
     
-    total_visits = admin_get_total_visits(sb) # 누적 방문수
-
-    today_dau = 0
-    if not df_dau.empty:
-        df_dau['date'] = pd.to_datetime(df_dau['date']).dt.date
-        # ✅ [핵심 수정] 한국 시간(KST) 기준으로 오늘 날짜 계산
-        today = (datetime.utcnow() + timedelta(hours=9)).date()
-        today_row = df_dau[df_dau['date'] == today]
-        if not today_row.empty:
-            today_dau = today_row.iloc[0]['session_count']
-
     m0, m1, m2, m3, m4 = st.columns(5)
     m0.metric("🏆 누적 방문수", f"{total_visits:,}회")
-    m1.metric("오늘 방문자 (DAU)", f"{today_dau}명")
+    m1.metric("오늘 방문자 (DAU)", f"{today_visitors}명")  # <--- 이제 정확히 나옵니다!
     m2.metric("현재 실시간", f"{len(sessions)}명")
     m3.metric("평균 체류", f"{dur_data.get('avg_duration_min', 0)}분")
     m4.metric("최대 집중", f"{dur_data.get('max_duration_min', 0)}분")
 
     st.divider()
 
+    # 그래프 배치 (일별 추이 그래프는 로직 단순화)
     col_g1, col_g2 = st.columns(2)
     with col_g1:
-        st.markdown("##### 📉 일별 활성 사용자 추이")
-        if not df_dau.empty:
-            st.line_chart(df_dau.set_index('date')[['session_count']], height=250)
-        else:
-            st.info("데이터 부족")
+        st.markdown("##### 📉 최근 7일 접속 추이")
+        # View 대신 직접 집계 (더 안정적)
+        try:
+            # 최근 7일치 가져오기 로직 (간단 구현)
+            res_7d = sb.table("app_sessions").select("created_at").gte("created_at", (datetime.utcnow() - timedelta(days=7)).isoformat()+"Z").execute()
+            df_7d = pd.DataFrame(res_7d.data)
+            if not df_7d.empty:
+                df_7d['created_at'] = pd.to_datetime(df_7d['created_at']).dt.tz_convert('Asia/Seoul')
+                df_7d['date'] = df_7d['created_at'].dt.date
+                dau_chart = df_7d.groupby('date').size()
+                st.line_chart(dau_chart, height=250)
+            else:
+                st.info("데이터가 부족합니다.")
+        except:
+            st.info("차트 데이터 로드 실패")
+
     with col_g2:
         st.markdown("##### ⏰ 시간대별 접속 분포")
         if not df_peak.empty:
             st.bar_chart(df_peak.set_index('hour')[['visit_count']], height=250)
         else:
-            st.info("데이터 부족")
+            st.info("데이터가 부족합니다.")
 
     st.divider()
 
-    # 4. 운영 성과 분석 (필터 및 KPI)
+    # 4. 운영 성과 및 비용 분석
     st.subheader("💰 운영 성과 및 비용 분석")
-
+    
+    # 필터
     filter_cols = st.columns([2, 2, 2, 1])
     with filter_cols[0]:
         all_users = ["(전체)"] + sorted(df["user_email"].unique().tolist()) if not df.empty else ["(전체)"]
@@ -2302,6 +2316,7 @@ def render_master_dashboard(sb):
         st.write("")
         apply_filter = st.button("적용", use_container_width=True, type="primary")
 
+    # 필터링
     filtered_df = df.copy()
     if not filtered_df.empty:
         if selected_user != "(전체)":
@@ -2313,139 +2328,89 @@ def render_master_dashboard(sb):
 
     st.divider()
 
-    total_runs = len(filtered_df)
-    total_tokens = int(filtered_df["token_usage"].sum()) if not filtered_df.empty else 0
-    total_cost = filtered_df["cost_usd"].sum() if not filtered_df.empty else 0.0
-    cost_per_run = total_cost / total_runs if total_runs > 0 else 0.0
-    avg_latency = filtered_df["execution_time"].mean() if total_runs > 0 else 0.0
-    online_now = len(sessions)
-
-    kpi_cols = st.columns(6)
-    kpi_cols[0].metric("🟢 현재 접속", f"{online_now}")
-    kpi_cols[1].metric("📦 총 실행", f"{total_runs:,}")
-    kpi_cols[2].metric("🧾 총 토큰", f"{total_tokens:,}")
-    kpi_cols[3].metric("💵 총 비용", f"${total_cost:.4f}")
-    kpi_cols[4].metric("💰 회당 비용", f"${cost_per_run:.6f}")
-    kpi_cols[5].metric("⏱️ 평균 지연", f"{avg_latency:.2f}s")
+    # KPI
+    total_cost = filtered_df["cost_usd"].sum() if not filtered_df.empty else 0
+    total_tokens = filtered_df["token_usage"].sum() if not filtered_df.empty else 0
+    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1.metric("💰 기간 내 비용", f"${total_cost:.4f}")
+    kpi2.metric("🧾 사용 토큰", f"{total_tokens:,}")
+    kpi3.metric("📦 실행 횟수", f"{len(filtered_df):,}건")
 
     st.divider()
 
-    # 5. 상세 차트 탭
-    chart_tabs = st.tabs(["📈 토큰/비용", "🤖 모델 분석", "🔥 지연 히트맵", "👤 사용자 분석"])
-
+    # 상세 차트
+    chart_tabs = st.tabs(["📈 비용/토큰", "🤖 모델 분석", "🔥 시간대/히트맵", "👤 사용자 랭킹"])
+    
     with chart_tabs[0]:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("📈 일별 토큰 사용량")
-            if not filtered_df.empty:
-                tok_daily = filtered_df.groupby("date")["token_usage"].sum().sort_index()
-                st.line_chart(tok_daily)
-        with col2:
-            st.subheader("💵 일별 비용 ($)")
-            if not filtered_df.empty:
-                cost_daily = filtered_df.groupby("date")["cost_usd"].sum().sort_index()
-                st.area_chart(cost_daily)
-
+        c1, c2 = st.columns(2)
+        if not filtered_df.empty:
+            c1.line_chart(filtered_df.groupby("date")["token_usage"].sum())
+            c2.area_chart(filtered_df.groupby("date")["cost_usd"].sum())
+    
     with chart_tabs[1]:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("🤖 모델별 사용 횟수")
-            if not filtered_df.empty:
-                st.bar_chart(filtered_df["model_used"].value_counts())
-        with col2:
-            st.subheader("💵 모델별 비용")
-            if not filtered_df.empty:
-                st.bar_chart(filtered_df.groupby("model_used")["cost_usd"].sum().sort_values(ascending=False))
+        c1, c2 = st.columns(2)
+        if not filtered_df.empty:
+            c1.bar_chart(filtered_df["model_used"].value_counts())
+            c2.bar_chart(filtered_df.groupby("model_used")["cost_usd"].sum())
 
     with chart_tabs[2]:
-        st.subheader("🔥 시간대별 지연 히트맵")
         if not filtered_df.empty:
             try:
                 import plotly.express as px
                 heatmap_data = filtered_df.groupby(["weekday", "hour"])["execution_time"].mean().unstack(fill_value=0)
-                weekday_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-                valid_days = [w for w in weekday_order if w in heatmap_data.index]
-                if valid_days:
-                    heatmap_data = heatmap_data.reindex(valid_days)
+                # 정렬
+                days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                days = [d for d in days if d in heatmap_data.index]
+                if days: heatmap_data = heatmap_data.reindex(days)
                 
-                fig = px.imshow(
-                    heatmap_data,
-                    labels=dict(x="시간", y="요일", color="평균 지연(s)"),
-                    x=heatmap_data.columns,
-                    y=heatmap_data.index,
-                    color_continuous_scale="RdYlGn_r",
-                    aspect="auto",
-                )
-                fig.update_layout(height=300)
+                fig = px.imshow(heatmap_data, labels=dict(x="시간", y="요일", color="지연(s)"), aspect="auto", color_continuous_scale="RdYlGn_r")
                 st.plotly_chart(fig, use_container_width=True)
-            except ImportError:
-                st.info("plotly 라이브러리가 없어 히트맵을 건너뜁니다.")
-            except Exception:
-                st.caption("히트맵 데이터를 생성하기에 데이터가 부족합니다.")
+            except:
+                st.bar_chart(filtered_df.groupby("hour")["execution_time"].mean())
 
     with chart_tabs[3]:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("👤 사용자별 실행 Top 10")
-            if not filtered_df.empty:
-                st.bar_chart(filtered_df["user_email"].value_counts().head(10))
-        with col2:
-            st.subheader("💵 사용자별 비용 Top 10")
-            if not filtered_df.empty:
-                st.bar_chart(filtered_df.groupby("user_email")["cost_usd"].sum().sort_values(ascending=False).head(10))
+        c1, c2 = st.columns(2)
+        if not filtered_df.empty:
+            c1.bar_chart(filtered_df["user_email"].value_counts().head(10))
+            c2.bar_chart(filtered_df.groupby("user_email")["cost_usd"].sum().sort_values(ascending=False).head(10))
 
     st.divider()
 
-    # 6. 상세 감사 로그 및 관리
-    st.subheader("📋 상세 감사 로그 (Audit Trail)")
+    # 로그 테이블 & 관리
+    st.subheader("📋 상세 감사 로그")
     if not filtered_df.empty:
-        display_df = filtered_df[["created_at", "user_email", "prompt", "model_used", "token_usage", "cost_usd", "execution_time", "id"]].copy()
-        display_df["created_at"] = display_df["created_at"].dt.strftime("%Y-%m-%d %H:%M")
-        display_df["prompt_short"] = display_df["prompt"].apply(lambda x: x[:40] + "..." if len(x) > 40 else x)
-        display_df["cost_usd"] = display_df["cost_usd"].apply(lambda x: f"${x:.6f}")
-        display_df["execution_time"] = display_df["execution_time"].apply(lambda x: f"{x:.1f}s")
-
-        def highlight_rows(row):
-            styles = [""] * len(row)
-            user = row["user_email"]
-            try: exec_time = float(row["execution_time"].replace("s",""))
-            except: exec_time = 0
-            if user in heavy_users: styles = ["background-color: #fef3c7"] * len(row)
-            if exec_time > LONG_LATENCY_THRESHOLD: styles = ["background-color: #fee2e2; color: #991b1b; font-weight: bold"] * len(row)
-            return styles
-
-        st.dataframe(display_df.style.apply(highlight_rows, axis=1), use_container_width=True, height=400)
-        st.caption("🟡 노란색: 과다 사용자 (상위 5%)  |  🔴 빨간색: 장시간 지연 (120초 초과)")
+        disp = filtered_df.sort_values("created_at", ascending=False).head(100)
+        disp["created_at"] = disp["created_at"].dt.strftime("%Y-%m-%d %H:%M")
         
-        with st.expander("🔍 프롬프트 원문 보기"):
-            sel_id = st.selectbox("로그 선택", display_df["id"].tolist(), format_func=lambda x: f"ID: {x}")
-            if sel_id:
-                txt = filtered_df[filtered_df["id"]==sel_id]["prompt"].values[0]
-                st.text_area("내용", txt, height=150)
-    else:
-        st.info("검색 조건에 맞는 로그가 없습니다.")
+        def style_rows(row):
+            s = [""]*len(row)
+            if row["user_email"] in heavy_users: s = ["background-color:#fef3c7"]*len(row)
+            return s
+            
+        st.dataframe(disp[["created_at", "user_email", "prompt", "model_used", "cost_usd"]].style.apply(style_rows, axis=1), use_container_width=True)
+        
+        with st.expander("🔍 내용 자세히 보기"):
+            sid = st.selectbox("로그 ID", disp["id"].tolist())
+            if sid: st.text_area("Prompt", filtered_df[filtered_df["id"]==sid]["prompt"].values[0])
 
-    st.divider()
+    # 삭제/다운로드
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📥 데이터 내보내기")
         if not filtered_df.empty:
-            csv = filtered_df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("💾 CSV 다운로드", data=csv, file_name=f"log_{datetime.now().date()}.csv", mime="text/csv")
+            st.download_button("💾 CSV 다운로드", filtered_df.to_csv(index=False).encode("utf-8-sig"), "log.csv", "text/csv")
     with col2:
-        st.subheader("🗑️ 데이터 삭제")
         if not filtered_df.empty:
-            del_id = st.selectbox("삭제할 ID", filtered_df["id"].head(20).tolist())
-            if st.button("❌ 삭제", type="primary"):
-                sb.table("work_archive").delete().eq("id", del_id).execute()
+            did = st.selectbox("삭제할 ID", filtered_df["id"].head(10).tolist())
+            if st.button("❌ 삭제"):
+                sb.table("work_archive").delete().eq("id", did).execute()
                 st.success("삭제됨")
                 st.rerun()
-    
+
+    # 원본 데이터 탭
     st.divider()
-    st.subheader("🔍 원본 데이터셋")
-    tab_s, tab_e = st.tabs(["세션(Sessions)", "이벤트(Events)"])
-    with tab_s: st.dataframe(sessions, use_container_width=True)
-    with tab_e: st.dataframe(events, use_container_width=True)
+    t1, t2 = st.tabs(["세션(Sessions)", "이벤트(Events)"])
+    with t1: st.dataframe(sessions, use_container_width=True)
+    with t2: st.dataframe(events, use_container_width=True)
 
 def render_lawbot_button(url: str):
     st.markdown(
@@ -2461,7 +2426,6 @@ def render_lawbot_button(url: str):
 """,
         unsafe_allow_html=True,
     )
-
 # =========================================================
 # 9) FOLLOWUP (깨진 부분 복원)
 # =========================================================
