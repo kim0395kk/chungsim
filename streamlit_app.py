@@ -2121,7 +2121,7 @@ def render_history_list(sb):
 
 
 # =========================================================
-# 8) ADMIN DASHBOARD (MERGED & FIXED)
+# 8) ADMIN DASHBOARD (FINAL FIX)
 # =========================================================
 def admin_fetch_work_archive(sb, limit: int = 5000) -> List[dict]:
     try:
@@ -2137,7 +2137,11 @@ def admin_fetch_work_archive(sb, limit: int = 5000) -> List[dict]:
         st.error(f"관리자 조회 실패(work_archive): {e}")
         return []
 
-def admin_fetch_sessions(sb, minutes: int = 5) -> List[dict]:
+def admin_fetch_sessions(sb, minutes: int = 10) -> List[dict]:
+    """
+    ✅ 수정됨: minutes=10
+    최근 10분 이내에 활동한 세션만 가져옵니다. (실시간 접속자용)
+    """
     try:
         cutoff = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
         resp = (
@@ -2151,16 +2155,6 @@ def admin_fetch_sessions(sb, minutes: int = 5) -> List[dict]:
     except Exception as e:
         st.error(f"관리자 조회 실패(app_sessions): {e}")
         return []
-
-def admin_get_total_visits(sb) -> int:
-    """app_sessions 테이블의 전체 행 개수를 셉니다 (누적 방문수)"""
-    try:
-        # head=True: 데이터는 안 가져오고 개수만 셉니다 (속도 빠름)
-        # count="exact": 정확한 개수를 요청합니다
-        res = sb.table("app_sessions").select("*", count="exact", head=True).execute()
-        return res.count if res.count is not None else 0
-    except Exception:
-        return 0
 
 def admin_fetch_events(sb, limit: int = 300) -> List[dict]:
     try:
@@ -2176,8 +2170,15 @@ def admin_fetch_events(sb, limit: int = 300) -> List[dict]:
         st.error(f"관리자 조회 실패(app_events): {e}")
         return []
 
+def admin_get_total_visits(sb) -> int:
+    """누적 방문수(Total Visits) 카운트"""
+    try:
+        res = sb.table("app_sessions").select("*", count="exact", head=True).execute()
+        return res.count if res.count is not None else 0
+    except Exception:
+        return 0
+
 def render_master_dashboard(sb):
-    """Google-style BI 대시보드 (통합 버전: User Engagement View + 기존 상세 분석)"""
     st.markdown("## 🏛️ 관리자 운영 마스터 콘솔")
 
     if not is_admin_user(st.session_state.get("user_email", "")):
@@ -2188,16 +2189,13 @@ def render_master_dashboard(sb):
         st.info("사이드바에서 **관리자모드 켜기**를 활성화하세요.")
         return
 
-    # ─────────────────────────────────────────────────────────
-    # 1. 데이터 로드 (Tables + Views)
-    # ─────────────────────────────────────────────────────────
+    # 1. 데이터 로드
     with st.spinner("📊 데이터 및 분석 뷰 로드 중..."):
-        # (1) 기본 테이블 데이터
         data = admin_fetch_work_archive(sb, limit=5000)
-        sessions = admin_fetch_sessions(sb, minutes=1440)
+        sessions = admin_fetch_sessions(sb, minutes=10) # 실시간 (10분)
         events = admin_fetch_events(sb, limit=200)
         
-        # (2) 분석 뷰(View) 데이터 (에러 방지 처리)
+        # View 데이터 로드 (에러 방지)
         try:
             res_dau = sb.table("view_analytics_dau").select("*").execute()
             df_dau = pd.DataFrame(res_dau.data) if res_dau.data else pd.DataFrame()
@@ -2217,13 +2215,7 @@ def render_master_dashboard(sb):
         st.error("pandas가 설치되어 있지 않습니다.")
         return
 
-    if not data:
-        st.info("표시할 데이터가 없습니다.")
-        # 데이터가 없더라도 View 차트는 보여줄 수 있으므로 return하지 않음
-
-    # ─────────────────────────────────────────────────────────
     # 2. DataFrame 가공
-    # ─────────────────────────────────────────────────────────
     df = pd.DataFrame(data)
     if not df.empty:
         df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
@@ -2238,7 +2230,6 @@ def render_master_dashboard(sb):
         df["search_count"] = pd.to_numeric(df["search_count"], errors="coerce").fillna(0).astype(int)
         df["prompt"] = df["prompt"].fillna("")
 
-        # 비용 계산
         def calc_cost(row):
             model = row["model_used"]
             tokens = row["token_usage"]
@@ -2247,7 +2238,6 @@ def render_master_dashboard(sb):
         
         df["cost_usd"] = df.apply(calc_cost, axis=1)
 
-        # Heavy User 계산
         user_run_counts = df["user_email"].value_counts()
         heavy_threshold = user_run_counts.quantile(HEAVY_USER_PERCENTILE / 100) if len(user_run_counts) > 1 else 999999
         heavy_users = set(user_run_counts[user_run_counts >= heavy_threshold].index)
@@ -2255,36 +2245,29 @@ def render_master_dashboard(sb):
         df["cost_usd"] = 0.0
         heavy_users = set()
 
-    # ─────────────────────────────────────────────────────────
-    # [SECTION A] 사용자 활동 분석 (User Engagement) - 신규 기능
-    # ─────────────────────────────────────────────────────────
+    # 3. 사용자 활동 지표 (수정된 부분)
     st.subheader("👥 사용자 활동 분석 (Engagement)")
     
-    # ★ 누적 방문수 가져오기
-    total_visits = admin_get_total_visits(sb)
+    total_visits = admin_get_total_visits(sb) # 누적 방문수
 
-    # 오늘 방문자 계산 (기존 로직)
     today_dau = 0
     if not df_dau.empty:
         df_dau['date'] = pd.to_datetime(df_dau['date']).dt.date
-        today = datetime.utcnow().date()
+        # ✅ [핵심 수정] 한국 시간(KST) 기준으로 오늘 날짜 계산
+        today = (datetime.utcnow() + timedelta(hours=9)).date()
         today_row = df_dau[df_dau['date'] == today]
         if not today_row.empty:
             today_dau = today_row.iloc[0]['session_count']
 
-    # ★ 컬럼을 5개로 늘려서 '누적 방문' 추가
     m0, m1, m2, m3, m4 = st.columns(5)
-    
-    m0.metric("🏆 누적 방문수", f"{total_visits:,}회")  # <--- 추가됨!
+    m0.metric("🏆 누적 방문수", f"{total_visits:,}회")
     m1.metric("오늘 방문자 (DAU)", f"{today_dau}명")
     m2.metric("현재 실시간", f"{len(sessions)}명")
     m3.metric("평균 체류", f"{dur_data.get('avg_duration_min', 0)}분")
     m4.metric("최대 집중", f"{dur_data.get('max_duration_min', 0)}분")
 
     st.divider()
-    st.divider()
 
-    # 활동 그래프 (좌: 일별추이 / 우: 시간대분포)
     col_g1, col_g2 = st.columns(2)
     with col_g1:
         st.markdown("##### 📉 일별 활성 사용자 추이")
@@ -2301,33 +2284,24 @@ def render_master_dashboard(sb):
 
     st.divider()
 
-    # ─────────────────────────────────────────────────────────
-    # [SECTION B] 운영 성과 분석 (Performance & Cost) - 기존 기능 복구
-    # ─────────────────────────────────────────────────────────
+    # 4. 운영 성과 분석 (필터 및 KPI)
     st.subheader("💰 운영 성과 및 비용 분석")
 
-    # 1. 필터 바 (Drill-down)
-    st.markdown("###### 🔍 상세 분석 필터")
     filter_cols = st.columns([2, 2, 2, 1])
-
     with filter_cols[0]:
         all_users = ["(전체)"] + sorted(df["user_email"].unique().tolist()) if not df.empty else ["(전체)"]
         selected_user = st.selectbox("👤 사용자", all_users, index=0)
-
     with filter_cols[1]:
         min_date = df["date"].min() if not df.empty else datetime.now().date()
         max_date = df["date"].max() if not df.empty else datetime.now().date()
         date_range = st.date_input("📅 날짜 범위", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-
     with filter_cols[2]:
         all_models = sorted(df["model_used"].unique().tolist()) if not df.empty else []
         selected_models = st.multiselect("🤖 모델", all_models, default=all_models)
-
     with filter_cols[3]:
-        st.write("") # Spacer
+        st.write("")
         apply_filter = st.button("적용", use_container_width=True, type="primary")
 
-    # 필터 적용 로직
     filtered_df = df.copy()
     if not filtered_df.empty:
         if selected_user != "(전체)":
@@ -2339,7 +2313,6 @@ def render_master_dashboard(sb):
 
     st.divider()
 
-    # 2. KPI 카드 (6 Columns) - ★ 요청하신 부분 복구됨 ★
     total_runs = len(filtered_df)
     total_tokens = int(filtered_df["token_usage"].sum()) if not filtered_df.empty else 0
     total_cost = filtered_df["cost_usd"].sum() if not filtered_df.empty else 0.0
@@ -2357,7 +2330,7 @@ def render_master_dashboard(sb):
 
     st.divider()
 
-    # 3. 상세 차트 탭 (4 Tabs) - ★ 요청하신 부분 복구됨 ★
+    # 5. 상세 차트 탭
     chart_tabs = st.tabs(["📈 토큰/비용", "🤖 모델 분석", "🔥 지연 히트맵", "👤 사용자 분석"])
 
     with chart_tabs[0]:
@@ -2391,7 +2364,6 @@ def render_master_dashboard(sb):
                 import plotly.express as px
                 heatmap_data = filtered_df.groupby(["weekday", "hour"])["execution_time"].mean().unstack(fill_value=0)
                 weekday_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-                # 존재하는 요일만 필터링해서 정렬
                 valid_days = [w for w in weekday_order if w in heatmap_data.index]
                 if valid_days:
                     heatmap_data = heatmap_data.reindex(valid_days)
@@ -2408,7 +2380,6 @@ def render_master_dashboard(sb):
                 st.plotly_chart(fig, use_container_width=True)
             except ImportError:
                 st.info("plotly 라이브러리가 없어 히트맵을 건너뜁니다.")
-                st.bar_chart(filtered_df.groupby("hour")["execution_time"].mean())
             except Exception:
                 st.caption("히트맵 데이터를 생성하기에 데이터가 부족합니다.")
 
@@ -2425,42 +2396,29 @@ def render_master_dashboard(sb):
 
     st.divider()
 
-    # ─────────────────────────────────────────────────────────
-    # [SECTION C] 상세 로그 및 관리 (Audit Trail)
-    # ─────────────────────────────────────────────────────────
+    # 6. 상세 감사 로그 및 관리
     st.subheader("📋 상세 감사 로그 (Audit Trail)")
-
     if not filtered_df.empty:
-        # 표시용 DF
         display_df = filtered_df[["created_at", "user_email", "prompt", "model_used", "token_usage", "cost_usd", "execution_time", "id"]].copy()
         display_df["created_at"] = display_df["created_at"].dt.strftime("%Y-%m-%d %H:%M")
         display_df["prompt_short"] = display_df["prompt"].apply(lambda x: x[:40] + "..." if len(x) > 40 else x)
         display_df["cost_usd"] = display_df["cost_usd"].apply(lambda x: f"${x:.6f}")
         display_df["execution_time"] = display_df["execution_time"].apply(lambda x: f"{x:.1f}s")
 
-        # 스타일 함수
         def highlight_rows(row):
             styles = [""] * len(row)
             user = row["user_email"]
             try: exec_time = float(row["execution_time"].replace("s",""))
             except: exec_time = 0
-            
-            if user in heavy_users:
-                styles = ["background-color: #fef3c7"] * len(row)
-            if exec_time > LONG_LATENCY_THRESHOLD:
-                styles = ["background-color: #fee2e2; color: #991b1b; font-weight: bold"] * len(row)
+            if user in heavy_users: styles = ["background-color: #fef3c7"] * len(row)
+            if exec_time > LONG_LATENCY_THRESHOLD: styles = ["background-color: #fee2e2; color: #991b1b; font-weight: bold"] * len(row)
             return styles
 
-        st.dataframe(
-            display_df[["created_at", "user_email", "prompt_short", "model_used", "token_usage", "cost_usd", "execution_time"]]
-            .style.apply(highlight_rows, axis=1),
-            use_container_width=True, height=400
-        )
+        st.dataframe(display_df.style.apply(highlight_rows, axis=1), use_container_width=True, height=400)
         st.caption("🟡 노란색: 과다 사용자 (상위 5%)  |  🔴 빨간색: 장시간 지연 (120초 초과)")
         
-        # 프롬프트 상세 보기
         with st.expander("🔍 프롬프트 원문 보기"):
-            sel_id = st.selectbox("로그 선택", display_df["id"].tolist(), format_func=lambda x: f"ID: {x}")
+                        sel_id = st.selectbox("로그 선택", display_df["id"].tolist(), format_func=lambda x: f"ID: {x}")
             if sel_id:
                 txt = filtered_df[filtered_df["id"]==sel_id]["prompt"].values[0]
                 st.text_area("내용", txt, height=150)
@@ -2468,15 +2426,12 @@ def render_master_dashboard(sb):
         st.info("검색 조건에 맞는 로그가 없습니다.")
 
     st.divider()
-
-    # 데이터 내보내기 및 삭제
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("📥 데이터 내보내기")
         if not filtered_df.empty:
             csv = filtered_df.to_csv(index=False).encode("utf-8-sig")
             st.download_button("💾 CSV 다운로드", data=csv, file_name=f"log_{datetime.now().date()}.csv", mime="text/csv")
-
     with col2:
         st.subheader("🗑️ 데이터 삭제")
         if not filtered_df.empty:
@@ -2487,8 +2442,6 @@ def render_master_dashboard(sb):
                 st.rerun()
     
     st.divider()
-    
-    # 세션/이벤트 원본 탭
     st.subheader("🔍 원본 데이터셋")
     tab_s, tab_e = st.tabs(["세션(Sessions)", "이벤트(Events)"])
     with tab_s: st.dataframe(sessions, use_container_width=True)
