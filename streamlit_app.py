@@ -1020,16 +1020,6 @@ def log_api_call(
     except Exception:
         pass
 
-import time
-import re
-import json
-from typing import Any, Optional, Tuple
-import streamlit as st
-import google.generativeai as genai
-from groq import Groq
-
-# (참고) 외부 유틸 함수(get_supabase, log_api_call, estimate_tokens, get_general_secret 등)는 
-# 기존에 정의되어 있다고 가정합니다.
 
 class LLMService:
     """✅ Vertex AI 제거됨: Gemini API (Google AI Studio) 및 Groq 폴백 전용"""
