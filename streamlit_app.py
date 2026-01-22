@@ -2152,6 +2152,16 @@ def admin_fetch_sessions(sb, minutes: int = 5) -> List[dict]:
         st.error(f"관리자 조회 실패(app_sessions): {e}")
         return []
 
+def admin_get_total_visits(sb) -> int:
+    """app_sessions 테이블의 전체 행 개수를 셉니다 (누적 방문수)"""
+    try:
+        # head=True: 데이터는 안 가져오고 개수만 셉니다 (속도 빠름)
+        # count="exact": 정확한 개수를 요청합니다
+        res = sb.table("app_sessions").select("*", count="exact", head=True).execute()
+        return res.count if res.count is not None else 0
+    except Exception:
+        return 0
+
 def admin_fetch_events(sb, limit: int = 300) -> List[dict]:
     try:
         resp = (
@@ -2250,23 +2260,28 @@ def render_master_dashboard(sb):
     # ─────────────────────────────────────────────────────────
     st.subheader("👥 사용자 활동 분석 (Engagement)")
     
-    # 상단 활동 지표
-    m1, m2, m3, m4 = st.columns(4)
-    
+    # ★ 누적 방문수 가져오기
+    total_visits = admin_get_total_visits(sb)
+
+    # 오늘 방문자 계산 (기존 로직)
     today_dau = 0
     if not df_dau.empty:
-        # DB 날짜 형식 호환성 처리
         df_dau['date'] = pd.to_datetime(df_dau['date']).dt.date
         today = datetime.utcnow().date()
         today_row = df_dau[df_dau['date'] == today]
         if not today_row.empty:
             today_dau = today_row.iloc[0]['session_count']
 
+    # ★ 컬럼을 5개로 늘려서 '누적 방문' 추가
+    m0, m1, m2, m3, m4 = st.columns(5)
+    
+    m0.metric("🏆 누적 방문수", f"{total_visits:,}회")  # <--- 추가됨!
     m1.metric("오늘 방문자 (DAU)", f"{today_dau}명")
-    m2.metric("현재 실시간 접속", f"{len(sessions)}명")
-    m3.metric("평균 체류 시간", f"{dur_data.get('avg_duration_min', 0)}분")
-    m4.metric("최대 집중 시간", f"{dur_data.get('max_duration_min', 0)}분")
+    m2.metric("현재 실시간", f"{len(sessions)}명")
+    m3.metric("평균 체류", f"{dur_data.get('avg_duration_min', 0)}분")
+    m4.metric("최대 집중", f"{dur_data.get('max_duration_min', 0)}분")
 
+    st.divider()
     st.divider()
 
     # 활동 그래프 (좌: 일별추이 / 우: 시간대분포)
