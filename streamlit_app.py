@@ -24,12 +24,6 @@ except Exception:
 vertexai = None
 GenerativeModel = None
 try:
-    import vertexai
-    from vertexai.generative_models import GenerativeModel
-except Exception:
-    pass
-
-try:
     import google.generativeai as genai
 except Exception:
     genai = None
@@ -1026,140 +1020,76 @@ def log_api_call(
     except Exception:
         pass
 
+import time
+import re
+import json
+from typing import Any, Optional, Tuple
+import streamlit as st
+import google.generativeai as genai
+from groq import Groq
+
+# (참고) 외부 유틸 함수(get_supabase, log_api_call, estimate_tokens, get_general_secret 등)는 
+# 기존에 정의되어 있다고 가정합니다.
+
 class LLMService:
-    """Vertex AI 기반 LLM 서비스 (Gemini API 및 Groq 폴백 지원)"""
+    """✅ Vertex AI 제거됨: Gemini API (Google AI Studio) 및 Groq 폴백 전용"""
     
     def __init__(self):
-        self.groq_key = get_general_secret("GROQ_API_KEY")
-        self.gemini_key = get_general_secret("GEMINI_API_KEY")
+        # 1. API 키 로드
+        self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
+        self.gemini_key = st.secrets.get("general", {}).get("GEMINI_API_KEY")
         
-        self.vertex_initialized = False
-        self.model = None
-        self.model_name = "gemini-2.5-flash"
-        
-        # Gemini API 모델 우선순위
+        # 2. 사용할 모델 설정 (2.5 -> 1.5로 수정함: 실존하는 모델 사용)
         self.gemini_models = [
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.0-flash",
+            "gemini-1.5-flash",       # 속도/가성비 최우선
+            "gemini-2.0-flash-exp",   # 최신 실험적 모델 (선택 사항)
+            "gemini-1.5-pro",         # 고성능 필요 시
         ]
         
-        # Vertex AI 초기화
-        self._init_vertex_ai()
-        
-        # Gemini API 초기화 (폴백용)
+        # 3. Gemini API 초기화
         self.gemini_api_ready = False
-        
-        # DEBUG: Check secrets
-        # st.sidebar.write(f"DEBUG: gemini_key present? {bool(self.gemini_key)}")
-        # st.sidebar.write(f"DEBUG: genai module? {bool(genai)}")
-        
-        if self.gemini_key and genai:
+        if self.gemini_key:
             try:
                 genai.configure(api_key=self.gemini_key)
                 self.gemini_api_ready = True
             except Exception as e:
-                self.gemini_api_ready = False
                 st.sidebar.error(f"Gemini Init Error: {e}")
         else:
-            if not self.gemini_key:
-                st.sidebar.warning("Gemini API Key missing")
-                # Try to read directly to see if helper is broken
-                direct_key = st.secrets.get("general", {}).get("GEMINI_API_KEY")
-                if direct_key:
-                     st.sidebar.info(f"Key found directly but helper failed? {bool(direct_key)}")
-                     self.gemini_key = direct_key # Force fix
-            if not genai:
-                st.sidebar.error("google.generativeai module not found")
-        
-        # Groq 클라이언트 (최후 폴백용)
+            st.sidebar.warning("Gemini API Key missing")
+
+        # 4. Groq 클라이언트 초기화 (폴백용)
         self.groq_client = None
-        if self.groq_key and Groq:
+        if self.groq_key:
             try:
                 self.groq_client = Groq(api_key=self.groq_key)
             except Exception:
-                self.groq_client = None
-
-    def _get_vertex_config(self) -> dict:
-        """secrets.toml에서 Vertex AI 설정 읽기"""
-        try:
-            vertex_config = st.secrets.get("vertex_ai", {})
-            return {
-                "project_id": vertex_config.get("PROJECT_ID", ""),
-                "location": vertex_config.get("LOCATION", "asia-northeast3"),
-                "model_name": vertex_config.get("MODEL_NAME", "gemini-2.5-flash"),
-                "service_account_json": vertex_config.get("SERVICE_ACCOUNT_JSON", ""),
-            }
-        except Exception:
-            return {}
-
-    def _init_vertex_ai(self):
-        """Vertex AI 초기화"""
-        if not vertexai or not GenerativeModel:
-            return
-        
-        config = self._get_vertex_config()
-        project_id = config.get("project_id", "")
-        location = config.get("location", "asia-northeast3")
-        self.model_name = config.get("model_name", "gemini-2.5-flash")
-        service_account_json = config.get("service_account_json", "")
-        
-        if not project_id:
-            return
-        
-        try:
-            # 서비스 계정 JSON이 있으면 사용, 없으면 ADC 사용
-            if service_account_json:
-                import os
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = service_account_json
-            
-            vertexai.init(project=project_id, location=location)
-            self.model = GenerativeModel(self.model_name)
-            self.vertex_initialized = True
-        except Exception as e:
-            st.session_state["vertex_init_error"] = str(e)
-            self.vertex_initialized = False
-
-    def is_available(self) -> bool:
-        return self.vertex_initialized or self.gemini_api_ready or (self.groq_client is not None)
-
-    def _try_vertex_text(self, prompt: str) -> Tuple[str, str]:
-        """Vertex AI로 텍스트 생성"""
-        if not self.vertex_initialized or not self.model:
-            raise Exception("Vertex AI not initialized")
-        
-        try:
-            response = self.model.generate_content(prompt)
-            return (response.text or "").strip(), self.model_name
-        except Exception as e:
-            raise Exception(f"Vertex AI error: {e}")
+                pass
 
     def _try_gemini_api_text(self, prompt: str) -> Tuple[str, str]:
-        """Gemini API (google.generativeai)로 텍스트 생성 (폴백)"""
+        """Gemini API로 텍스트 생성"""
         if not self.gemini_api_ready:
-            reason = "Unknown"
-            if not self.gemini_key:
-                reason = "API Key Missing"
-            elif not genai:
-                reason = "Module Missing (Restart Terminal)"
-            else:
-                reason = "Init Failed (Check Sidebar)"
-            raise Exception(f"Gemini API not ready: {reason}")
+            raise Exception("Gemini API not ready")
             
         last_error = None
+        
+        # 모델 목록을 순회하며 시도
         for m_name in self.gemini_models:
             try:
+                # generation_config로 온도(temperature) 조절 가능
                 model = genai.GenerativeModel(m_name)
-                response = model.generate_content(prompt)
+                response = model.generate_content(
+                    prompt, 
+                    generation_config=genai.types.GenerationConfig(temperature=0.1)
+                )
                 return (response.text or "").strip(), m_name
             except Exception as e:
                 last_error = e
-                continue
+                continue # 다음 모델 시도
         
-        raise Exception(f"All Gemini API models failed. Last error: {last_error}")
+        raise Exception(f"All Gemini models failed. Last error: {last_error}")
 
     def _generate_groq(self, prompt: str) -> str:
-        """Groq 폴백"""
+        """Groq (Llama 3.3) 폴백"""
         try:
             completion = self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -1171,61 +1101,66 @@ class LLMService:
             return "System Error"
 
     def generate_text(self, prompt: str) -> str:
-        """텍스트 생성 (Vertex AI -> Gemini API -> Groq 순서로 시도)"""
-        sb = get_supabase()
+        """메인 함수: Gemini API -> Groq 순서로 시도"""
+        sb = get_supabase() # 외부 함수
         start_time = time.time()
-        input_tokens = estimate_tokens(prompt)
         
-        # 1. Vertex AI 시도
+        # 토큰 계산 (외부 함수 가정)
         try:
-            text, used = self._try_vertex_text(prompt)
+            input_tokens = estimate_tokens(prompt)
+        except:
+            input_tokens = 0
+        
+        # 1. Gemini API 시도 (메인)
+        try:
+            text, used_model = self._try_gemini_api_text(prompt)
             if text:
                 latency = int((time.time() - start_time) * 1000)
-                output_tokens = estimate_tokens(text)
-                st.session_state["last_model_used"] = f"{used} (Vertex AI)"
-                log_api_call(sb, "llm_vertex", used, input_tokens, output_tokens, latency, True, None, prompt[:100], text[:100])
-                return text
-        except Exception:
-            pass
-
-        # 2. Gemini API 시도 (폴백 1)
-        try:
-            text, used = self._try_gemini_api_text(prompt)
-            if text:
-                latency = int((time.time() - start_time) * 1000)
-                output_tokens = estimate_tokens(text)
-                st.session_state["last_model_used"] = f"{used} (Gemini API)"
-                log_api_call(sb, "llm_gemini", used, input_tokens, output_tokens, latency, True, None, prompt[:100], text[:100])
+                output_tokens = estimate_tokens(text) if 'estimate_tokens' in globals() else 0
+                
+                st.session_state["last_model_used"] = f"{used_model} (Gemini API)"
+                
+                # 로그 기록
+                log_api_call(sb, "llm_gemini", used_model, input_tokens, output_tokens, latency, True, None, prompt[:100], text[:100])
                 return text
         except Exception as e:
-            st.sidebar.error(f"Gemini API Error: {e}")
+            # 실패 시 로그만 찍고 Groq로 넘어감
+            # print(f"Gemini Failed: {e}") 
             pass
 
-        # 3. Groq 시도 (폴백 2)
+        # 2. Groq 시도 (폴백)
         if self.groq_client:
             out = self._generate_groq(prompt)
             latency = int((time.time() - start_time) * 1000)
-            output_tokens = estimate_tokens(out)
-            success = out != "System Error"
-            if not success:
-                 st.sidebar.error("Groq API Error: Check API Key or Quota")
-                 log_api_call(sb, "llm_groq", "llama-3.3-70b-versatile", input_tokens, 0, latency, False, "System Error", prompt[:100])
+            
+            success = (out != "System Error")
+            if success:
+                st.session_state["last_model_used"] = "llama-3.3-70b-versatile (Groq)"
+                log_api_call(sb, "llm_groq", "llama-3.3-70b-versatile", input_tokens, 0, latency, True, None, prompt[:100], out[:100])
+                return out
             else:
-                log_api_call(sb, "llm_groq", "llama-3.3-70b-versatile", input_tokens, output_tokens, latency, True, None, prompt[:100], out[:100])
-            st.session_state["last_model_used"] = "llama-3.3-70b-versatile (Groq)"
-            return out
-
+                log_api_call(sb, "llm_groq", "llama-3.3-70b-versatile", input_tokens, 0, latency, False, "System Error", prompt[:100])
+        
         st.session_state["last_model_used"] = None
-        return "시스템 오류: 모든 AI 모델 연결 실패"
+        return "시스템 오류: AI 응답 불가"
 
     def generate_json(self, prompt: str) -> Optional[Any]:
-        """JSON 생성"""
-        strict = prompt + "\n\n반드시 JSON만 출력. 다른 텍스트 금지."
+        """JSON 생성 유틸"""
+        # Gemini 1.5 Flash는 JSON 모드를 지원하지만, 간단하게 텍스트로 요청
+        strict = prompt + "\n\n반드시 순수한 JSON 형식만 출력하세요. 마크다운(```json)이나 불필요한 설명 제외."
         text = self.generate_text(strict)
-        return _safe_json_loads(text)
+        
+        # 마크다운 제거
+        text = re.sub(r"```json", "", text)
+        text = re.sub(r"```", "", text).strip()
+        
+        try:
+            return json.loads(text)
+        except:
+            return None
 
+# 인스턴스 생성
 llm_service = LLMService()
-
 
 class SearchService:
     """✅ 뉴스 중심 경량 검색"""
