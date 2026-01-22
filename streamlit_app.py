@@ -1029,11 +1029,11 @@ class LLMService:
         self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
         self.gemini_key = st.secrets.get("general", {}).get("GEMINI_API_KEY")
         
-        # 2. 사용할 모델 설정 (2.5 -> 1.5로 수정함: 실존하는 모델 사용)
+        # 2. 사용할 모델 설정
         self.gemini_models = [
             "gemini-1.5-flash",       # 속도/가성비 최우선
-            "gemini-2.0-flash-exp",   # 최신 실험적 모델 (선택 사항)
-            "gemini-1.5-pro",         # 고성능 필요 시
+            "gemini-2.0-flash-exp",   # 최신 실험적 모델
+            "gemini-1.5-pro",         # 고성능
         ]
         
         # 3. Gemini API 초기화
@@ -1055,6 +1055,11 @@ class LLMService:
             except Exception:
                 pass
 
+    # ✅ [누락되었던 부분 복구]
+    def is_available(self) -> bool:
+        """서비스 가용 여부 확인"""
+        return self.gemini_api_ready or (self.groq_client is not None)
+
     def _try_gemini_api_text(self, prompt: str) -> Tuple[str, str]:
         """Gemini API로 텍스트 생성"""
         if not self.gemini_api_ready:
@@ -1062,10 +1067,8 @@ class LLMService:
             
         last_error = None
         
-        # 모델 목록을 순회하며 시도
         for m_name in self.gemini_models:
             try:
-                # generation_config로 온도(temperature) 조절 가능
                 model = genai.GenerativeModel(m_name)
                 response = model.generate_content(
                     prompt, 
@@ -1074,7 +1077,7 @@ class LLMService:
                 return (response.text or "").strip(), m_name
             except Exception as e:
                 last_error = e
-                continue # 다음 모델 시도
+                continue 
         
         raise Exception(f"All Gemini models failed. Last error: {last_error}")
 
@@ -1092,38 +1095,36 @@ class LLMService:
 
     def generate_text(self, prompt: str) -> str:
         """메인 함수: Gemini API -> Groq 순서로 시도"""
-        sb = get_supabase() # 외부 함수
+        sb = get_supabase()
         start_time = time.time()
         
-        # 토큰 계산 (외부 함수 가정)
         try:
             input_tokens = estimate_tokens(prompt)
         except:
             input_tokens = 0
         
-        # 1. Gemini API 시도 (메인)
+        # 1. Gemini API 시도
         try:
             text, used_model = self._try_gemini_api_text(prompt)
             if text:
                 latency = int((time.time() - start_time) * 1000)
-                output_tokens = estimate_tokens(text) if 'estimate_tokens' in globals() else 0
+                try:
+                    output_tokens = estimate_tokens(text)
+                except:
+                    output_tokens = 0
                 
                 st.session_state["last_model_used"] = f"{used_model} (Gemini API)"
-                
-                # 로그 기록
                 log_api_call(sb, "llm_gemini", used_model, input_tokens, output_tokens, latency, True, None, prompt[:100], text[:100])
                 return text
-        except Exception as e:
-            # 실패 시 로그만 찍고 Groq로 넘어감
-            # print(f"Gemini Failed: {e}") 
+        except Exception:
             pass
 
-        # 2. Groq 시도 (폴백)
+        # 2. Groq 시도
         if self.groq_client:
             out = self._generate_groq(prompt)
             latency = int((time.time() - start_time) * 1000)
-            
             success = (out != "System Error")
+            
             if success:
                 st.session_state["last_model_used"] = "llama-3.3-70b-versatile (Groq)"
                 log_api_call(sb, "llm_groq", "llama-3.3-70b-versatile", input_tokens, 0, latency, True, None, prompt[:100], out[:100])
@@ -1136,14 +1137,10 @@ class LLMService:
 
     def generate_json(self, prompt: str) -> Optional[Any]:
         """JSON 생성 유틸"""
-        # Gemini 1.5 Flash는 JSON 모드를 지원하지만, 간단하게 텍스트로 요청
         strict = prompt + "\n\n반드시 순수한 JSON 형식만 출력하세요. 마크다운(```json)이나 불필요한 설명 제외."
         text = self.generate_text(strict)
-        
-        # 마크다운 제거
         text = re.sub(r"```json", "", text)
         text = re.sub(r"```", "", text).strip()
-        
         try:
             return json.loads(text)
         except:
