@@ -154,14 +154,32 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
     return s[:limit] + "\n...(생략)"
 
 def call_llm(prompt: str) -> str:
-    """
-    TODO: 너의 기존 Gemini 호출로 바꿔치기
-    예)
-      return llm_service.generate(prompt)
-      또는
-      return gemini_complete(prompt)
-    """
-    raise NotImplementedError("call_llm()을 너의 Gemini 호출 함수로 연결해줘.")
+    # 1) 함수가 이미 있으면 그걸 사용
+    if "ask_gemini" in globals():
+        return globals()["ask_gemini"](prompt)
+    if "gemini_complete" in globals():
+        return globals()["gemini_complete"](prompt)
+    if "generate_answer" in globals():
+        return globals()["generate_answer"](prompt)
+
+    # 2) LLMService 클래스가 있으면 사용
+    if "LLMService" in globals():
+        svc = globals()["LLMService"]()
+        for m in ("generate", "ask", "chat", "complete"):
+            if hasattr(svc, m):
+                return getattr(svc, m)(prompt)
+
+    # 3) 세션에 박아둔 서비스가 있으면 사용
+    for key in ("llm_service", "llm", "gemini"):
+        obj = st.session_state.get(key)
+        if obj:
+            for m in ("generate", "ask", "chat", "complete"):
+                if hasattr(obj, m):
+                    return getattr(obj, m)(prompt)
+
+    # 여기까지 왔으면 연결 대상이 없음
+    st.error("Gemini 호출 함수/서비스를 찾지 못했어요. 기존 호출 함수 이름을 call_llm에 연결해주세요.")
+    return "LLM 연결이 설정되지 않았습니다."
     
 
 def render_header(title):
