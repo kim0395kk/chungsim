@@ -153,11 +153,33 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
         return s
     return s[:limit] + "\n...(생략)"
 
+import streamlit as st
+
 def call_llm(prompt: str) -> str:
     """
-    ✅ general 섹션 키로만 Gemini 호출
+    ✅ general 섹션 키만 사용
+    ✅ 모델은 세션에 캐시해서 매번 재생성 안 함
     """
-    model = _get_gemini_model_general()
+    try:
+        import google.generativeai as genai
+    except Exception as e:
+        # requirements.txt에 google-generativeai가 없을 때 주로 발생
+        st.error("google-generativeai 패키지가 설치되어 있어야 합니다. requirements.txt 확인!")
+        raise
+
+    # 1) 모델 캐시(세션)
+    if "gemini_model_general" not in st.session_state:
+        key = st.secrets.get("general", {}).get("GEMINI_API_KEY")
+        if not key:
+            raise RuntimeError("st.secrets[general][GEMINI_API_KEY]가 없습니다. general 섹션 확인!")
+
+        genai.configure(api_key=key)
+        model_name = st.secrets.get("general", {}).get("GEMINI_MODEL", "gemini-2.5-flash")
+        st.session_state["gemini_model_general"] = genai.GenerativeModel(model_name)
+
+    model = st.session_state["gemini_model_general"]
+
+    # 2) 생성
     resp = model.generate_content(prompt)
 
     text = getattr(resp, "text", None)
@@ -169,6 +191,7 @@ def call_llm(prompt: str) -> str:
         return resp.candidates[0].content.parts[0].text.strip()
     except Exception:
         return str(resp)
+
     
 
 def render_header(title):
