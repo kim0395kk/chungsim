@@ -153,6 +153,17 @@ def _short_for_context(s: str, limit: int = 2500) -> str:
         return s
     return s[:limit] + "\n...(생략)"
 
+def call_llm(prompt: str) -> str:
+    """
+    TODO: 너의 기존 Gemini 호출로 바꿔치기
+    예)
+      return llm_service.generate(prompt)
+      또는
+      return gemini_complete(prompt)
+    """
+    raise NotImplementedError("call_llm()을 너의 Gemini 호출 함수로 연결해줘.")
+    
+
 def render_header(title):
     st.markdown(
         f"""
@@ -957,6 +968,60 @@ def log_event(sb, event_type: str, archive_id: Optional[str] = None, meta: Optio
         
     except Exception:
         pass
+def retrieve_duty_context(sb, query: str, k: int = 8) -> list[dict]:
+    if not sb:
+        return []
+    try:
+        res = sb.rpc("search_duty_manual", {"q": query, "k": k}).execute()
+        return res.data or []
+    except Exception as e:
+        st.warning(f"매뉴얼 검색 실패: {e}")
+        return []
+
+
+def build_rag_prompt(user_query: str, hits: list[dict]) -> str:
+    context = "\n\n".join(
+        [f"### {h.get('section_path','')}\n{h.get('content','')}" for h in hits]
+    ).strip()
+
+    return f"""
+너는 '충주시청 당직 매뉴얼' 기반 챗봇이다.
+반드시 아래 [매뉴얼 발췌]에서 근거를 찾아서 답하라.
+- 답변은 실행 가능한 조치 중심(연락처/절차/우선순위)으로 작성
+- 매뉴얼에 근거가 없으면: "매뉴얼 근거를 찾지 못했습니다." 라고 말하고, 확인 질문 1개만 한다.
+- 민원인에게 바로 읽어줄 수 있는 말투로 짧고 명확하게.
+
+[매뉴얼 발췌]
+{context if context else "(검색 결과 없음)"}
+
+[질문]
+{user_query}
+""".strip()
+
+
+def build_1min_report_prompt(chat_messages: list[dict]) -> str:
+    # 최근 대화 10개 정도만 반영
+    tail = chat_messages[-10:]
+    convo = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in tail])
+
+    return f"""
+너는 당직 근무자용 '1분 보고서' 작성기다.
+아래 대화 내용을 근거로, 실제 보고/인계에 쓰기 좋은 형식으로 작성해라.
+형식은 반드시 아래를 지켜라.
+
+- 민원요지:
+- 발생장소:
+- 긴급도:
+- 즉시조치(연락/출동/안내):
+- 추가확인(필요 시 1~2개):
+- 근거(매뉴얼/대화에서 나온 핵심 1~3줄):
+- 작성시각:
+
+[대화]
+{convo}
+
+작성시각: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+""".strip()
 
 
 def log_api_call(
@@ -2059,6 +2124,73 @@ def sidebar_auth(sb):
                 st.session_state.reset_stage = 1
                 log_event(sb, "reset_done")
                 st.rerun()
+def duty_manual_chat_dialog(sb):
+    # 로그인 여부는 너 기존 상태키에 맞게 바꿔도 됨
+    if not st.session_state.get("logged_in", True):
+        st.info("공무원 로그인 후 이용 가능합니다.")
+        return
+
+    # 세션 대화 기록
+    if "duty_chat" not in st.session_state:
+        st.session_state.duty_chat = [
+            {"role": "assistant", "content": "당직 매뉴얼 기반으로 답변할게요. 상황을 한 문장으로 말해줘요."}
+        ]
+
+    # 대화 표시
+    for m in st.session_state.duty_chat:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    # 입력
+    user_query = st.chat_input("민원/상황을 입력하세요 (예: 하수도 역류, 로드킬, 교통신호 고장)")
+    if user_query:
+        st.session_state.duty_chat.append({"role": "user", "content": user_query})
+
+        # 검색 → 프롬프트 → LLM
+        hits = retrieve_duty_context(sb, user_query, k=8)
+        prompt = build_rag_prompt(user_query, hits)
+
+        with st.chat_message("assistant"):
+            with st.spinner("매뉴얼 검색 후 답변 생성 중..."):
+                answer = call_llm(prompt)
+            st.markdown(answer)
+
+        st.session_state.duty_chat.append({"role": "assistant", "content": answer})
+
+    # 1분 보고서 버튼
+    st.divider()
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        if st.button("📝 1분 보고서 생성", use_container_width=True):
+            report_prompt = build_1min_report_prompt(st.session_state.duty_chat)
+            with st.chat_message("assistant"):
+                with st.spinner("보고서 생성 중..."):
+                    report = call_llm(report_prompt)
+                st.markdown(report)
+            st.session_state.duty_chat.append({"role": "assistant", "content": report})
+
+    with col2:
+        if st.button("🧹 대화 초기화", use_container_width=True):
+            st.session_state.duty_chat = [
+                {"role": "assistant", "content": "초기화됐어요. 새 민원/상황을 입력해줘요."}
+            ]
+            st.rerun()
+
+
+def render_duty_manual_button(sb):
+    # 사이드바 버튼
+    if st.sidebar.button("📘 당직메뉴얼", use_container_width=True):
+        # Streamlit에 st.dialog 있으면 팝업
+        if hasattr(st, "dialog"):
+            @st.dialog("당직메뉴얼 챗봇")
+            def _dlg():
+                duty_manual_chat_dialog(sb)
+            _dlg()
+        else:
+            # fallback: 본문에 expander로 표시
+            st.warning("현재 Streamlit 버전은 팝업(dialog)을 지원하지 않아 본문에 표시합니다.")
+            with st.expander("당직메뉴얼 챗봇", expanded=True):
+                duty_manual_chat_dialog(sb)
 
 
 # =========================================================
@@ -2521,7 +2653,8 @@ def _followup_agent_answer(res: dict, user_q: str) -> Tuple[str, Optional[dict]]
 def main():
     sb = get_supabase()
     ensure_anon_session_id()
-
+    render_duty_manual_button(sb)
+    
     if sb:
         touch_session(sb)
         if "boot_logged" not in st.session_state:
