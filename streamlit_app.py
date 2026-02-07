@@ -67,7 +67,17 @@ MODEL_PRICING = {
 
 from govable_ai.features.duty_manual import render_duty_manual_button
 from govable_ai.features.document_revision import render_revision_sidebar_button, run_revision_workflow
-from govable_ai.ui.premium_animations import render_revision_animation
+"""Optional UI animations.
+
+Some deployments (e.g., Streamlit Cloud) may not include the optional
+`govable_ai.ui.premium_animations` module. Treat it as optional so the app
+still boots.
+"""
+try:
+    from govable_ai.ui.premium_animations import render_revision_animation
+except Exception:
+    def render_revision_animation(*args, **kwargs):
+        return None
 from govable_ai.export import generate_official_docx, generate_guide_docx
 from govable_ai.core.llm_service import LLMService
 from govable_ai.config import get_secret, get_vertex_config
