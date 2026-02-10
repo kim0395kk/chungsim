@@ -65,29 +65,88 @@ MODEL_PRICING = {
     "(unknown)": 0.10,
 }
 
-from govable_ai.features.duty_manual import render_duty_manual_button
-from govable_ai.features.document_revision import render_revision_sidebar_button, run_revision_workflow
-"""Optional UI animations.
+# 선택적 모듈 임포트
+try:
+    from govable_ai.features.duty_manual import render_duty_manual_button
+except Exception:
+    def render_duty_manual_button(*args, **kwargs):
+        pass
 
-Some deployments (e.g., Streamlit Cloud) may not include the optional
-`govable_ai.ui.premium_animations` module. Treat it as optional so the app
-still boots.
-"""
+try:
+    from govable_ai.features.document_revision import render_revision_sidebar_button, run_revision_workflow
+except Exception:
+    def render_revision_sidebar_button(*args, **kwargs):
+        pass
+    def run_revision_workflow(*args, **kwargs):
+        return {"error": "Document revision module is not available"}
+
+# 환각 탐지 모듈 임포트
+from hallucination_detection import (
+    detect_hallucination,
+    detect_hallucination_cached,
+    get_text_hash,
+    analyze_petition_priority,
+    generate_processing_checklist,
+    generate_response_draft,
+    render_hallucination_report
+)
+# Optional UI animations.
+#
+# Some deployments (e.g., Streamlit Cloud) may not include the optional
+# `govable_ai.ui.premium_animations` module. Treat it as optional so the app
+# still boots.
 try:
     from govable_ai.ui.premium_animations import render_revision_animation
 except Exception:
     def render_revision_animation(*args, **kwargs):
         return None
-from govable_ai.export import generate_official_docx, generate_guide_docx
-from govable_ai.core.llm_service import LLMService
-from govable_ai.config import get_secret, get_vertex_config
+
+try:
+    from govable_ai.export import generate_official_docx, generate_guide_docx
+except Exception:
+    def generate_official_docx(*args, **kwargs):
+        raise NotImplementedError("govable_ai.export module is not available")
+    def generate_guide_docx(*args, **kwargs):
+        raise NotImplementedError("govable_ai.export module is not available")
+
+try:
+    from govable_ai.core.llm_service import LLMService
+except Exception:
+    # 더미 LLMService 클래스 - secrets 접근 없이 작동
+    class LLMService:
+        def __init__(self, *args, **kwargs):
+            # 더미 클래스는 초기화 시 아무 작업도 하지 않음
+            self.vertex_config = None
+            self.gemini_key = None
+            self.groq_key = None
+        def is_available(self):
+            return False
+        def generate(self, *args, **kwargs):
+            return "LLM service is not available"
+        def generate_text(self, *args, **kwargs):
+            return "LLM service is not available"
+        def generate_json(self, *args, **kwargs):
+            return {}
+
+try:
+    from govable_ai.config import get_secret, get_vertex_config
+except Exception:
+    def get_secret(*args, **kwargs):
+        return None
+    def get_vertex_config(*args, **kwargs):
+        return None
 
 # Initialize LLM Service Globally
-llm_service = LLMService(
-    vertex_config=get_vertex_config(),
-    gemini_key=get_secret("general", "GEMINI_API_KEY"),
-    groq_key=get_secret("general", "GROQ_API_KEY"),
-)
+try:
+    llm_service = LLMService(
+        vertex_config=get_vertex_config(),
+        gemini_key=get_secret("general", "GEMINI_API_KEY"),
+        groq_key=get_secret("general", "GROQ_API_KEY"),
+    )
+except Exception as e:
+    # secrets.toml이 없거나 LLMService 초기화 실패 시 더미 인스턴스 사용
+    print(f"Warning: LLMService initialization failed: {e}")
+    llm_service = LLMService()  # 더미 LLMService 사용
 
 # Heavy user / Long latency 임계값
 HEAVY_USER_PERCENTILE = 95  # 상위 5% = 과다 사용자
@@ -914,7 +973,11 @@ def get_secret(path1: str, path2: str = "") -> Optional[str]:
         return None
 
 def get_general_secret(key: str) -> Optional[str]:
-    return (st.secrets.get("general", {}) or {}).get(key) or st.secrets.get(key)
+    try:
+        return (st.secrets.get("general", {}) or {}).get(key) or st.secrets.get(key)
+    except Exception:
+        # secrets.toml이 없는 경우
+        return None
 
 def get_supabase():
     if "sb" in st.session_state and st.session_state.sb is not None:
@@ -1182,9 +1245,14 @@ class LLMService:
     """✅ Vertex AI 제거됨: Gemini API (Google AI Studio) 및 Groq 폴백 전용"""
     
     def __init__(self):
-        # 1. API 키 로드
-        self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
-        self.gemini_key = st.secrets.get("general", {}).get("GEMINI_API_KEY")
+        # 1. API 키 로드 (secrets가 없어도 앱이 부팅되도록 안전하게 처리)
+        try:
+            self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
+            self.gemini_key = st.secrets.get("general", {}).get("GEMINI_API_KEY")
+        except Exception:
+            # secrets.toml이 없는 경우
+            self.groq_key = None
+            self.gemini_key = None
         
         # 2. 사용할 모델 설정
         self.gemini_models = [
@@ -1341,9 +1409,14 @@ llm_service = LLMService()
 class SearchService:
     """✅ 뉴스 중심 경량 검색"""
     def __init__(self):
-        g = st.secrets.get("general", {})
-        self.client_id = g.get("NAVER_CLIENT_ID")
-        self.client_secret = g.get("NAVER_CLIENT_SECRET")
+        try:
+            g = st.secrets.get("general", {})
+            self.client_id = g.get("NAVER_CLIENT_ID")
+            self.client_secret = g.get("NAVER_CLIENT_SECRET")
+        except Exception:
+            # secrets.toml이 없는 경우
+            self.client_id = None
+            self.client_secret = None
         self.news_url = "https://openapi.naver.com/v1/search/news.json"
 
     def _headers(self):
@@ -3360,8 +3433,14 @@ def main():
             st.session_state["workflow_result"] = None
             st.session_state["main_task_input"] = ""
             st.rerun()
+        # [NEW] AI 민원 검증 버튼
+        if st.sidebar.button("🔍 AI 민원 검증", use_container_width=True):
+            st.session_state["app_mode"] = "hallucination_check"
+            st.session_state["workflow_result"] = None
+            st.session_state["main_task_input"] = ""
+            st.rerun()
         # [NEW] 업무지시로 돌아가기 버튼
-        if st.session_state.get("app_mode") in ["revision", "complaint_analyzer"]:
+        if st.session_state.get("app_mode") in ["revision", "complaint_analyzer", "hallucination_check"]:
             if st.sidebar.button("⬅️ 업무지시로 돌아가기", use_container_width=True):
                 st.session_state["app_mode"] = None
                 st.session_state["workflow_result"] = None
@@ -3693,6 +3772,326 @@ def main():
                 st.markdown(res.get("law") or "")
                 st.markdown("#### 🔧 처리/회신 전략")
                 st.markdown(res.get("strategy") or "")
+
+
+        # ---------------------------------------------------------
+        # [MODE] 환각 검증 모드
+        # ---------------------------------------------------------
+        elif st.session_state.get("app_mode") == "hallucination_check":
+            render_header("🔍 AI 생성 민원 검증 시스템")
+            
+            # 사용 안내
+            st.markdown("""
+            ### 🎯 이 기능은 무엇을 하나요?
+            
+            생성형 AI(ChatGPT, Claude 등)로 작성된 민원에 포함될 수 있는 **환각(허위 정보)**을 자동으로 탐지합니다.
+            
+            **주요 기능**:
+            - ✅ 날짜/시간의 논리적 타당성 검증
+            - ✅ 법령/조례 인용의 실존 여부 확인
+            - ✅ 수치 데이터 일관성 검사
+            - ✅ 행정 절차 서술의 정확성 평가
+            - ✅ 처리 우선순위 자동 판단
+            - ✅ 업무 체크리스트 자동 생성
+            """)
+            
+            with st.expander("❓ 사용 방법 및 주의사항"):
+                st.markdown("""
+                ### 📖 사용 방법
+                1. 아래에 검증할 민원 내용을 붙여넣기
+                2. 또는 파일 업로드 (TXT, DOCX, PDF)
+                3. "🔍 환각 검증 시작" 버튼 클릭
+                4. 결과 확인 및 의심 구간 검토
+                
+                ### ⚠️ 주의사항
+                - 이 도구는 **보조 수단**입니다. 최종 판단은 담당자가 해야 합니다.
+                - "환각 위험 높음"이라고 해서 반드시 허위는 아닙니다.
+                - 중요한 사안은 반드시 원본 서류 및 관련 법령을 직접 확인하세요.
+                
+                ### 💡 결과 해석
+                - **위험도 낮음 (✅)**: 일반적인 민원, 정상 처리
+                - **위험도 중간 (⚡)**: 일부 검증 권장, 의심 구간 확인
+                - **위험도 높음 (⚠️)**: 필수 검증 대상, 담당자 면담 권장
+                """)
+            
+            st.divider()
+            
+            # 입력 섹션
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                petition_input = st.text_area(
+                    "📝 검증할 민원 내용을 입력하세요",
+                    height=300,
+                    placeholder="""예시:
+2024년 13월 32일에 ○○구청에서...
+주민등록법 제999조에 따르면...
+통계청 자료에 따르면 정확히 47.3829%가...""",
+                    key="hallucination_petition_input"
+                )
+            
+            with col2:
+                uploaded_file = st.file_uploader(
+                    "또는 파일 업로드",
+                    type=['txt', 'docx', 'pdf'],
+                    help="민원 문서를 업로드하세요",
+                    key="hallucination_file_upload"
+                )
+                
+                if uploaded_file:
+                    try:
+                        import io
+                        if uploaded_file.type == "text/plain":
+                            petition_input = uploaded_file.read().decode('utf-8')
+                            st.session_state.hallucination_petition_input = petition_input
+                        elif uploaded_file.type == "application/pdf":
+                            st.info("PDF 파일 파싱 중...")
+                            # TODO: PDF 파싱 로직 추가
+                        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                            st.info("DOCX 파일 파싱 중...")
+                            # TODO: DOCX 파싱 로직 추가
+                        
+                        st.success("파일 업로드 완료!")
+                    except Exception as e:
+                        st.error(f"파일 읽기 오류: {e}")
+            
+            # 검증 실행
+            col_btn1, col_btn2 = st.columns([3, 1])
+            with col_btn1:
+                verify_btn = st.button(
+                    "🔍 환각 검증 시작", 
+                    type="primary", 
+                    use_container_width=True,
+                    disabled=not petition_input
+                )
+            with col_btn2:
+                if petition_input:
+                    st.caption(f"📏 {len(petition_input)}자")
+            
+            if verify_btn and petition_input:
+                # 진행 상황 표시
+                progress_text = st.empty()
+                progress_bar = st.progress(0)
+                
+                try:
+                    # Step 1: 환각 탐지 (40%)
+                    progress_text.text("🔍 환각 패턴 탐지 중...")
+                    progress_bar.progress(20)
+                    
+                    text_hash = get_text_hash(petition_input)
+                    detection_result = detect_hallucination_cached(
+                        text_hash,
+                        petition_input,
+                        {},
+                        llm_service
+                    )
+                    progress_bar.progress(40)
+                    
+                    # Step 2: 우선순위 분석 (70%)
+                    progress_text.text("📊 우선순위 분석 중...")
+                    priority_analysis = analyze_petition_priority(
+                        petition_input, 
+                        detection_result,
+                        llm_service
+                    )
+                    progress_bar.progress(70)
+                    
+                    # Step 3: 체크리스트 생성 (100%)
+                    progress_text.text("✅ 체크리스트 생성 중...")
+                    checklist = generate_processing_checklist(
+                        {
+                            "petition": petition_input,
+                            "detection": detection_result,
+                            "priority": priority_analysis
+                        },
+                        llm_service
+                    )
+                    progress_bar.progress(100)
+                    
+                    # 완료
+                    progress_text.empty()
+                    progress_bar.empty()
+                    
+                    st.success("✅ 검증 완료!")
+                    
+                    # === 결과 표시 ===
+                    st.divider()
+                    
+                    # 1. 환각 탐지 결과
+                    st.subheader("🔍 환각 탐지 결과")
+                    render_hallucination_report(detection_result)
+                    
+                    st.divider()
+                    
+                    # 2. 우선순위 정보
+                    st.subheader("📊 처리 우선순위 분석")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        priority_colors = {
+                            "urgent": "🔴",
+                            "high": "🟠",
+                            "normal": "🟡",
+                            "low": "🟢"
+                        }
+                        priority = priority_analysis.get('priority', 'normal')
+                        st.metric(
+                            "긴급도", 
+                            f"{priority_colors.get(priority, '⚪')} {priority.upper()}"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "업무 복잡도", 
+                            priority_analysis.get('estimated_workload', '보통')
+                        )
+                    
+                    with col3:
+                        deadline = priority_analysis.get('recommended_deadline', '')
+                        st.metric(
+                            "권장 처리기한", 
+                            deadline
+                        )
+                    
+                    with col4:
+                        dept_count = len(priority_analysis.get('required_departments', []))
+                        st.metric(
+                            "관련 부서", 
+                            f"{dept_count}개"
+                        )
+                    
+                    # 상세 정보
+                    col_detail1, col_detail2 = st.columns(2)
+                    
+                    with col_detail1:
+                        st.markdown("**📋 관련 부서**")
+                        departments = priority_analysis.get('required_departments', ['담당부서'])
+                        st.write(", ".join(departments))
+                    
+                    with col_detail2:
+                        st.markdown("**🏷️ 자동 태그**")
+                        tags = priority_analysis.get('auto_tags', [])
+                        if tags:
+                            tag_html = " ".join([f"<span style='background: #e5e7eb; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; margin-right: 0.25rem;'>{tag}</span>" for tag in tags])
+                            st.markdown(tag_html, unsafe_allow_html=True)
+                        else:
+                            st.caption("태그 없음")
+                    
+                    with st.expander("📝 우선순위 판단 근거"):
+                        reasoning = priority_analysis.get('reasoning', '분석 중...')
+                        st.write(reasoning)
+                    
+                    st.divider()
+                    
+                    # 3. 처리 체크리스트
+                    st.subheader("✅ 업무 처리 체크리스트")
+                    
+                    for step_data in checklist:
+                        step_num = step_data.get('step', 0)
+                        step_title = step_data.get('title', '단계')
+                        step_deadline = step_data.get('deadline', '')
+                        items = step_data.get('items', [])
+                        
+                        with st.expander(
+                            f"**Step {step_num}: {step_title}** (기한: {step_deadline})", 
+                            expanded=(step_num == 1)
+                        ):
+                            for i, item in enumerate(items):
+                                task_text = item.get('task', '')
+                                completed = item.get('completed', False)
+                                
+                                checked = st.checkbox(
+                                    task_text,
+                                    value=completed,
+                                    key=f"check_{step_num}_{i}_{get_text_hash(task_text)[:8]}"
+                                )
+                    
+                    st.divider()
+                    
+                    # 4. 회신문 자동 초안
+                    st.subheader("📄 회신문 자동 초안 생성")
+                    
+                    col_response1, col_response2 = st.columns([2, 1])
+                    
+                    with col_response1:
+                        response_type = st.selectbox(
+                            "회신 유형 선택",
+                            ["approval", "rejection", "partial", "request_info"],
+                            format_func=lambda x: {
+                                "approval": "✅ 승인/수용",
+                                "rejection": "❌ 불가/거부",
+                                "partial": "⚖️ 부분 수용",
+                                "request_info": "📝 보완 요청"
+                            }[x],
+                            key="response_type_select"
+                        )
+                    
+                    with col_response2:
+                        generate_draft_btn = st.button(
+                            "📝 초안 생성",
+                            use_container_width=True,
+                            type="secondary"
+                        )
+                    
+                    if generate_draft_btn or st.session_state.get('response_draft'):
+                        if generate_draft_btn:
+                            with st.spinner("회신문 작성 중... (약 10초 소요)"):
+                                draft = generate_response_draft(
+                                    petition_input,
+                                    {
+                                        "detection": detection_result,
+                                        "priority": priority_analysis
+                                    },
+                                    response_type,
+                                    llm_service
+                                )
+                                st.session_state.response_draft = draft
+                        else:
+                            draft = st.session_state.response_draft
+                        
+                        st.text_area(
+                            "생성된 회신문 초안 (수정 가능)",
+                            draft,
+                            height=400,
+                            key="draft_editor"
+                        )
+                        
+                        # DOCX 다운로드
+                        col_dl1, col_dl2 = st.columns(2)
+                        
+                        with col_dl1:
+                            try:
+                                today_str = datetime.now().strftime("%Y%m%d")
+                                
+                                # 회신문을 공문서 형식으로 변환
+                                doc_data = {
+                                    "title": f"{response_type.upper()} 회신",
+                                    "body_paragraphs": draft.split('\n\n')
+                                }
+                                
+                                docx_bytes = generate_official_docx(doc_data)
+                                
+                                st.download_button(
+                                    "📥 회신문 DOCX 다운로드",
+                                    docx_bytes,
+                                    f"회신문_{response_type}_{today_str}.docx",
+                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    use_container_width=True
+                                )
+                            except Exception as e:
+                                st.error(f"DOCX 생성 오류: {e}")
+                        
+                        with col_dl2:
+                            # 텍스트 복사
+                            if st.button("📋 텍스트 복사", use_container_width=True):
+                                st.code(draft, language=None)
+                                st.info("👆 위 텍스트를 복사하세요")
+                
+                except Exception as e:
+                    st.error(f"❌ 검증 중 오류 발생: {e}")
+                    import traceback
+                    with st.expander("🔧 상세 오류 정보"):
+                        st.code(traceback.format_exc())
 
 
         # ---------------------------------------------------------
