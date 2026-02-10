@@ -47,7 +47,7 @@ except Exception:
 # =========================================================
 # 0) SETTINGS
 # =========================================================
-APP_VERSION = "2026-01-15-agentboost-fixed"
+APP_VERSION = "2026-01-16-export-import-guard"
 MAX_FOLLOWUP_Q = 5
 ADMIN_EMAIL = "kim0395kk@korea.kr"
 LAW_BOT_SEARCH_URL = "https://www.law.go.kr/LSW/ais/searchList.do?query="
@@ -78,7 +78,123 @@ try:
 except Exception:
     def render_revision_animation(*args, **kwargs):
         return None
-from govable_ai.export import generate_official_docx, generate_guide_docx
+
+"""Optional DOCX export module.
+
+Never hard-fail app boot on missing `govable_ai.export`.
+Use lazy wrappers so import errors only affect download actions.
+"""
+from io import BytesIO
+
+
+def _fallback_text_bytes(title: str, lines: List[str]) -> bytes:
+    return "\n".join([title, "=" * len(title), ""] + lines).encode("utf-8")
+
+
+def _local_generate_official_docx(doc_data: Dict[str, Any]) -> bytes:
+    try:
+        from docx import Document
+    except Exception:
+        Document = None
+
+    data = doc_data or {}
+    title = str(data.get("title") or "공문서")
+    receiver = str(data.get("receiver") or "수신자 참조")
+    head = str(data.get("department_head") or "행정기관장")
+    body = data.get("body_paragraphs") or []
+    if isinstance(body, str):
+        body = [body]
+    else:
+        body = [str(x) for x in body if x is not None]
+
+    if Document is None:
+        return _fallback_text_bytes(title, [f"수신: {receiver}", ""] + body + ["", head])
+
+    buffer = BytesIO()
+    document = Document()
+    document.add_heading(title, level=1)
+    document.add_paragraph(f"수신: {receiver}")
+    for line in body:
+        document.add_paragraph(line)
+    document.add_paragraph("")
+    document.add_paragraph(head)
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _local_generate_guide_docx(guide_data: Dict[str, Any]) -> bytes:
+    try:
+        from docx import Document
+    except Exception:
+        Document = None
+
+    data = guide_data or {}
+    analysis = data.get("analysis") or {}
+    procedure = data.get("procedure") or {}
+    summary = analysis.get("summary") or analysis.get("core_issue") or "요약 정보가 없습니다."
+    checklist = procedure.get("checklist") or []
+    templates = procedure.get("templates") or []
+    if isinstance(summary, list):
+        summary_lines = [str(x) for x in summary if x is not None]
+    else:
+        summary_lines = [str(summary)]
+    checklist = [str(x) for x in checklist if x is not None]
+    templates = [str(x) for x in templates if x is not None]
+
+    if Document is None:
+        lines = ["[핵심 요약]"] + summary_lines + ["", "[체크리스트]"] + checklist + ["", "[필요 서식]"] + templates
+        return _fallback_text_bytes("처리가이드", lines)
+
+    buffer = BytesIO()
+    document = Document()
+    document.add_heading("처리가이드", level=1)
+    document.add_heading("핵심 요약", level=2)
+    for line in summary_lines:
+        document.add_paragraph(line)
+    document.add_heading("체크리스트", level=2)
+    if checklist:
+        for item in checklist:
+            document.add_paragraph(item, style="List Bullet")
+    else:
+        document.add_paragraph("체크리스트 정보가 없습니다.")
+    document.add_heading("필요 서식", level=2)
+    if templates:
+        for item in templates:
+            document.add_paragraph(item, style="List Bullet")
+    else:
+        document.add_paragraph("서식 정보가 없습니다.")
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+_EXTERNAL_EXPORTERS: Optional[Tuple[Any, Any]] = None
+
+
+def _load_external_exporters() -> Tuple[Any, Any]:
+    global _EXTERNAL_EXPORTERS
+    if _EXTERNAL_EXPORTERS is not None:
+        return _EXTERNAL_EXPORTERS
+
+    try:
+        from govable_ai.export import generate_official_docx as _external_official
+        from govable_ai.export import generate_guide_docx as _external_guide
+
+        _EXTERNAL_EXPORTERS = (_external_official, _external_guide)
+    except Exception:
+        _EXTERNAL_EXPORTERS = (_local_generate_official_docx, _local_generate_guide_docx)
+
+    return _EXTERNAL_EXPORTERS
+
+
+def generate_official_docx(doc_data: Dict[str, Any]) -> bytes:
+    official_exporter, _ = _load_external_exporters()
+    return official_exporter(doc_data)
+
+
+def generate_guide_docx(guide_data: Dict[str, Any]) -> bytes:
+    _, guide_exporter = _load_external_exporters()
+    return guide_exporter(guide_data)
+
 from govable_ai.core.llm_service import LLMService
 from govable_ai.config import get_secret, get_vertex_config
 
