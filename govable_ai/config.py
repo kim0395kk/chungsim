@@ -4,6 +4,7 @@ Govable AI - 설정 및 상수 관리
 UI 의존성 없음 (streamlit import 금지)
 """
 import os
+from collections.abc import Mapping
 from typing import Any, Dict, Optional
 
 # =========================================================
@@ -70,7 +71,7 @@ def get_secret(path1: str, path2: str = "") -> Any:
     if path2:
         if path1 in secrets:
             nested = secrets[path1]
-            if isinstance(nested, dict) and path2 in nested:
+            if isinstance(nested, Mapping) and path2 in nested:
                 return nested[path2]
         # fallback to env
         return os.environ.get(path2)
@@ -95,7 +96,15 @@ def get_vertex_config() -> Optional[Dict]:
     vertex = secrets.get("vertex_ai", {})
     
     if not vertex:
-        return None
+        project_id = os.environ.get("VERTEX_AI_PROJECT_ID")
+        if not project_id:
+            return None
+        return {
+            "project_id": project_id,
+            "location": os.environ.get("VERTEX_AI_LOCATION", "us-central1"),
+            "model_id": os.environ.get("VERTEX_AI_MODEL_ID", "gemini-2.5-flash"),
+            "credentials_json": os.environ.get("VERTEX_AI_CREDENTIALS_JSON"),
+        }
     
     return {
         "project_id": vertex.get("project_id"),
@@ -112,8 +121,15 @@ def get_supabase_config() -> Optional[Dict[str, str]]:
     Returns:
         dict with keys: url, anon_key or None
     """
-    url = get_secret("SUPABASE_URL")
-    key = get_secret("SUPABASE_ANON_KEY")
+    # 1. Try "supabase" section first (preferred)
+    url = get_secret("supabase", "SUPABASE_URL")
+    key = get_secret("supabase", "SUPABASE_KEY") or get_secret("supabase", "SUPABASE_ANON_KEY")
+    
+    # 2. Fallback to top-level or env vars if not found in section
+    if not url:
+        url = get_secret("SUPABASE_URL")
+    if not key:
+        key = get_secret("SUPABASE_KEY") or get_secret("SUPABASE_ANON_KEY")
     
     if url and key:
         return {"url": url, "anon_key": key}

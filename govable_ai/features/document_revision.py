@@ -4,6 +4,8 @@ import json
 import re
 from typing import Optional, Tuple, Dict, Any
 
+MODEL_REVISION = "gemini-2.5-flash"
+
 def render_revision_sidebar_button():
     """
     사이드바에 '기안/공고문 수정' 버튼을 렌더링하고,
@@ -79,9 +81,25 @@ def run_revision_workflow(user_input: str, llm_service) -> Dict[str, Any]:
 - JSON 이외의 텍스트는 출력하지 마라.
 """
     try:
-        result = llm_service.generate_json(prompt, preferred_model="gemini-2.5-flash")
+        result = llm_service.generate_json(prompt, preferred_model=MODEL_REVISION)
         if not result:
             return {"error": "AI 응답을 분석할 수 없습니다."}
+        # 투명성: 실제 사용 모델을 결과에 포함
+        used_model = None
+        try:
+            if hasattr(llm_service, "get_last_usage"):
+                used_model = (llm_service.get_last_usage() or {}).get("model_used")
+        except Exception:
+            used_model = None
+
+        if isinstance(result, dict):
+            result["model_used"] = used_model
+            # 요청 모델이 실제로 사용되지 않은 경우 사용자에게 명시
+            if used_model and MODEL_REVISION not in str(used_model):
+                result["warning"] = (
+                    f"요청한 {MODEL_REVISION} 모델을 사용하지 못해 폴백 모델로 처리되었습니다. "
+                    f"(실사용: {used_model})"
+                )
         return result
     except Exception as e:
         return {"error": f"처리 중 오류 발생: {str(e)}"}
