@@ -1629,182 +1629,8 @@ def log_lawbot_query(
         pass
 
 
-class StreamlitLLMService:
-    """✅ Vertex AI 제거됨: Gemini API (Google AI Studio) 및 Groq 폴백 전용"""
-    
-    def __init__(self):
-        # 1. API 키 로드 (secrets가 없어도 앱이 부팅되도록 안전하게 처리)
-        try:
-            self.groq_key = st.secrets.get("general", {}).get("GROQ_API_KEY")
-            self.gemini_key = st.secrets.get("general", {}).get("GEMINI_API_KEY")
-        except Exception:
-            # secrets.toml이 없는 경우
-            self.groq_key = None
-            self.gemini_key = None
-        
-        # 2. 사용할 모델 설정
-        self.gemini_models = [
-            "gemini-2.0-flash-lite",       # 업무지시 기본 모델
-            "gemini-2.5-flash-lite",       # 속도/가성비 대체
-            "gemini-2.5-flash",            # 기본 안정 모델
-            "gemini-1.5-pro",         # 고성능
-        ]
-        
-        # 3. Gemini API 초기화
-        self.gemini_api_ready = False
-        if self.gemini_key:
-            try:
-                genai.configure(api_key=self.gemini_key)
-                self.gemini_api_ready = True
-            except Exception as e:
-                st.sidebar.error(f"Gemini Init Error: {e}")
-        else:
-            st.sidebar.warning("Gemini API Key missing")
-
-        # 4. Groq 클라이언트 초기화 (폴백용)
-        self.groq_client = None
-        if self.groq_key:
-            try:
-                self.groq_client = Groq(api_key=self.groq_key)
-            except Exception:
-                pass
-
-    # ✅ [누락되었던 부분 복구]
-    def is_available(self) -> bool:
-        """서비스 가용 여부 확인"""
-        return self.gemini_api_ready or (self.groq_client is not None)
-
-    def _try_gemini_api_text(self, prompt: str, preferred_model: Optional[str] = None) -> Tuple[str, str]:
-        """Gemini API로 텍스트 생성
-        
-        Args:
-            prompt: 생성할 텍스트 프롬프트
-            preferred_model: 우선적으로 사용할 모델 이름 (예: 'gemini-2.5-flash')
-        """
-        if not self.gemini_api_ready:
-            raise Exception("Gemini API not ready")
-            
-        last_error = None
-        
-        model_aliases = {
-            "gemini-3.0-flash": "gemini-2.5-flash",
-            "gemini-3-flash-preview": "gemini-2.5-flash",
-            "models/gemini-3.0-flash": "gemini-2.5-flash",
-        }
-        normalized_preferred = model_aliases.get(preferred_model, preferred_model) if preferred_model else None
-
-        # 우선 모델이 지정된 경우 먼저 시도 (중복 제거)
-        models_to_try = [normalized_preferred] + self.gemini_models if normalized_preferred else list(self.gemini_models)
-        models_to_try = list(dict.fromkeys(models_to_try))
-        
-        for m_name in models_to_try:
-            if not m_name:  # None 스킵
-                continue
-            try:
-                model = genai.GenerativeModel(m_name)
-                response = model.generate_content(prompt)
-                return (response.text or "").strip(), m_name
-            except Exception as e:
-                last_error = e
-                continue 
-        
-        raise Exception(f"All Gemini models failed. Last error: {last_error}")
-
-    def _generate_groq(self, prompt: str) -> str:
-        """Groq (Llama 3.3) 폴백"""
-        try:
-            completion = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-            )
-            return (completion.choices[0].message.content or "").strip()
-        except Exception:
-            return "System Error"
-
-    def generate_text(self, prompt: str, preferred_model: Optional[str] = None) -> str:
-        """메인 함수: Gemini API -> Groq 순서로 시도
-        
-        Args:
-            prompt: 생성할 텍스트 프롬프트
-            preferred_model: 우선적으로 사용할 모델 이름 (예: 'gemini-2.5-flash')
-        """
-        sb = get_supabase()
-        start_time = time.time()
-        
-        try:
-            input_tokens = estimate_tokens(prompt)
-        except:
-            input_tokens = 0
-        
-        # 1. Gemini API 시도
-        try:
-            text, used_model = self._try_gemini_api_text(prompt, preferred_model)
-            if text:
-                latency = int((time.time() - start_time) * 1000)
-                try:
-                    output_tokens = estimate_tokens(text)
-                except:
-                    output_tokens = 0
-                
-                st.session_state["last_model_used"] = f"{used_model} (Gemini API)"
-                log_api_call(sb, "llm_gemini", used_model, input_tokens, output_tokens, latency, True, None, prompt[:100], text[:100])
-                return text
-        except Exception:
-            pass
-
-        # 2. Groq 시도
-        if self.groq_client:
-            out = self._generate_groq(prompt)
-            latency = int((time.time() - start_time) * 1000)
-            success = (out != "System Error")
-            
-            if success:
-                st.session_state["last_model_used"] = "llama-3.3-70b-versatile (Groq)"
-                log_api_call(sb, "llm_groq", "llama-3.3-70b-versatile", input_tokens, 0, latency, True, None, prompt[:100], out[:100])
-                return out
-            else:
-                log_api_call(sb, "llm_groq", "llama-3.3-70b-versatile", input_tokens, 0, latency, False, "System Error", prompt[:100])
-        
-        st.session_state["last_model_used"] = None
-        return "시스템 오류: AI 응답 불가"
-
-    def generate_json(self, prompt: str, preferred_model: Optional[str] = None) -> Optional[Any]:
-        """JSON 생성 유틸
-        
-        Args:
-            prompt: 생성할 JSON 프롬프트
-            preferred_model: 우선적으로 사용할 모델 이름 (예: 'gemini-2.5-flash')
-        """
-        strict = prompt + "\n\n반드시 순수한 JSON 형식만 출력하세요. 마크다운(```json)이나 불필요한 설명 제외."
-        text = self.generate_text(strict, preferred_model)
-        text = re.sub(r"```json", "", text)
-        text = re.sub(r"```", "", text).strip()
-        try:
-            return json.loads(text)
-        except:
-            return None
-    
-    def embed_text(self, text: str) -> list:
-        """Gemini API를 사용한 텍스트 임베딩"""
-        if not self.gemini_api_ready:
-            return []
-        try:
-            # text-embedding-004 사용
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_query"
-            )
-            return result['embedding']
-        except Exception:
-            return []
-
-# 인스턴스 생성
-# Prefer the core LLM service initialized earlier. Fall back to local service only
-# when no usable instance exists (e.g., import/init failure).
-if not globals().get("llm_service"):
-    llm_service = StreamlitLLMService()
+# StreamlitLLMService 는 govable_ai.core.llm_service.LLMService 로 단일화되었다.
+# 인스턴스(`llm_service`)는 위쪽에서 _LazyLLMService 로 이미 초기화되어 있다.
 
 class SearchService:
     """✅ 뉴스 중심 경량 검색"""
@@ -2444,7 +2270,7 @@ def run_workflow(user_input: str, log_placeholder, mode: str = "신속") -> dict
 
     full_res_text = str(analysis) + str(law_md) + str(news) + str(strategy) + str(doc)
     estimated_tokens = int(len(full_res_text) * 0.7)
-    model_used = st.session_state.get("last_model_used")
+    model_used = getattr(llm_service, "last_model_used", None)
 
     return {
         "situation": user_input,
@@ -2896,7 +2722,7 @@ REFUTED(반박)은 근거가 명확할 때만 선택하며, 불확실하면 INSU
 
     full_res_text = str(parsed) + str(verified_citations) + str(verdicts) + str(doc)
     estimated_tokens = int(len(full_res_text) * 0.7)
-    model_used = st.session_state.get("last_model_used")
+    model_used = getattr(llm_service, "last_model_used", None)
 
     return {
         "situation": user_input,
