@@ -98,28 +98,8 @@ from hallucination_detection import (
     render_verification_log,
     render_highlighted_text
 )
-# Optional UI animations.
-#
-# Some deployments (e.g., Streamlit Cloud) may not include the optional
-# `govable_ai.ui.premium_animations` module. Treat it as optional so the app
-# still boots.
-try:
-    from govable_ai.ui.premium_animations import render_revision_animation
-except Exception:
-    def render_revision_animation(placeholder, workflow_fn, combined_input, llm_service, sb=None, user_email=None):
-        """premium_animations 없을 때 기본 동작: 스피너와 함께 워크플로우 실행"""
-        import streamlit as st
-        with st.spinner("📝 AI가 문서를 분석하고 수정하고 있습니다..."):
-            result = workflow_fn(combined_input, llm_service)
-        return result
-
-try:
-    from govable_ai.export import generate_official_docx, generate_guide_docx
-except Exception:
-    def generate_official_docx(*args, **kwargs):
-        raise NotImplementedError("govable_ai.export module is not available")
-    def generate_guide_docx(*args, **kwargs):
-        raise NotImplementedError("govable_ai.export module is not available")
+from govable_ai.ui.premium_animations import render_revision_animation
+from govable_ai.export import generate_official_docx, generate_guide_docx
 
 try:
     from govable_ai.core.llm_service import LLMService
