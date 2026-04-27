@@ -59,6 +59,7 @@ class PageEntry:
 # 페이지 등록부 — 새 페이지는 여기 한 줄만 추가하면 됨.
 # =============================================================================
 _REGISTRY: list[PageEntry] = [
+    # --- Core workflows ---
     PageEntry(
         key="workflow",
         label="🧠 업무 처리",
@@ -72,10 +73,54 @@ _REGISTRY: list[PageEntry] = [
         func="render_doc_compiler_page",
     ),
     PageEntry(
+        key="revision",
+        label="📝 기안문 수정",
+        module="govable_ai.ui.pages.document_revision",
+        func="render_document_revision_page",
+    ),
+    PageEntry(
+        key="complaint",
+        label="🧾 민원 분석기",
+        module="govable_ai.ui.pages.complaint_analyzer",
+        func="render_complaint_analyzer_page",
+    ),
+    PageEntry(
+        key="hallucination",
+        label="🔍 환각 검사",
+        module="govable_ai.ui.pages.hallucination_check",
+        func="render_hallucination_check_page",
+    ),
+    # --- Search / RAG ---
+    PageEntry(
         key="civil",
         label="👷 토목 RAG",
         module="govable_ai.ui.pages.civil_engineering",
         func="render_civil_engineering_page",
+    ),
+    PageEntry(
+        key="duty",
+        label="📚 업무편람",
+        module="govable_ai.ui.pages.duty_manual",
+        func="render_duty_manual_page",
+    ),
+    # --- Meta / 운영 ---
+    PageEntry(
+        key="history",
+        label="🗂️ 작업 이력",
+        module="govable_ai.ui.pages.archive_history",
+        func="render_archive_history_page",
+    ),
+    PageEntry(
+        key="health",
+        label="🩺 시스템 상태",
+        module="govable_ai.ui.pages.service_health",
+        func="render_service_health_page",
+    ),
+    PageEntry(
+        key="dashboard",
+        label="🏛️ 마스터 대시보드",
+        module="govable_ai.ui.pages.master_dashboard",
+        func="render_master_dashboard_page",
     ),
 ]
 
