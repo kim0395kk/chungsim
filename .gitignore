@@ -1,16 +1,41 @@
-# Streamlit secrets
+# --- Secrets & env ---
 .streamlit/secrets.toml
 .env
+.env.local
+.env.*.local
 
-# Python compilation
+# --- Python ---
 __pycache__/
 *.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
 
-# System files
-.DS_Store
-Thumbs.db
+# --- Node (NPM artifacts that don't belong in this Python project) ---
+node_modules/
+package.json
+package-lock.json
 
-# Runtime logs
+# --- Runtime / logs ---
 *.log
 *.out
 *.err
+*_run.err.log
+*_run.out.log
+
+# --- System ---
+.DS_Store
+Thumbs.db
+
+# --- Editors / agents ---
+.vscode/
+.idea/
+.claude/
+.agents/
+
+# --- Loose / temp drafts ---
+*.tmp
+새 텍스트 문서*.txt
