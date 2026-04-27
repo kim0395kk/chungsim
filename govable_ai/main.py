@@ -48,6 +48,7 @@ from govable_ai.ui.components import render_header, render_lawbot_button, render
 from govable_ai.ui.auth import sidebar_auth, render_history_list, is_admin_user
 from govable_ai.ui.dashboard import render_master_dashboard
 from govable_ai.ui.doc_compiler_page import render_doc_compiler_page
+from govable_ai.ui.pages.civil_engineering import render_civil_engineering_page
 
 
 # =========================================================
@@ -273,27 +274,33 @@ def main():
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("## 📌 메뉴")
-    
-    col_nav1, col_nav2 = st.sidebar.columns(2)
-    with col_nav1:
-        if st.button("🧠 업무 처리", use_container_width=True, key="nav_workflow"):
-            st.session_state.current_page = "workflow"
+
+    PAGES = {
+        "workflow": "🧠 업무 처리",
+        "compiler": "📋 공문 컴파일",
+        "civil": "👷 토목 RAG",
+    }
+    for key, label in PAGES.items():
+        if st.sidebar.button(
+            label,
+            use_container_width=True,
+            key=f"nav_{key}",
+            type="primary" if st.session_state.current_page == key else "secondary",
+        ):
+            st.session_state.current_page = key
             st.rerun()
-    with col_nav2:
-        if st.button("📋 공문 컴파일", use_container_width=True, key="nav_compiler"):
-            st.session_state.current_page = "compiler"
-            st.rerun()
-    
-    # 현재 페이지 표시
-    page_name = "업무 처리" if st.session_state.current_page == "workflow" else "공문서 컴파일러"
-    st.sidebar.caption(f"📍 현재: {page_name}")
-    
+
+    st.sidebar.caption(f"📍 현재: {PAGES.get(st.session_state.current_page, '?')}")
+
     render_history_list(db)
-    
-    # 공문서 컴파일러 페이지인 경우 별도 렌더링
+
+    # 페이지 라우팅 (workflow 외 페이지는 즉시 렌더링 후 반환)
     if st.session_state.current_page == "compiler":
         render_doc_compiler_page(llm)
-        return  # 컴파일러 페이지만 표시하고 종료
+        return
+    if st.session_state.current_page == "civil":
+        render_civil_engineering_page(llm)
+        return
     
     # 관리자 모드 체크
     is_admin_tab = (
