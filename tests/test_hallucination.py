@@ -1,7 +1,11 @@
 """
 환각 탐지 기능 테스트 스크립트
 """
-from hallucination_detection import (
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from hallucination_detection import (  # noqa: E402
     detect_hallucination,
     _detect_by_patterns,
     get_text_hash,

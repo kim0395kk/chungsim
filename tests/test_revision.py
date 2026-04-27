@@ -1,7 +1,11 @@
 """
 기안문 수정 기능 테스트 스크립트
 """
-from govable_ai.features.document_revision import run_revision_workflow
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from govable_ai.features.document_revision import run_revision_workflow  # noqa: E402
 
 # Mock LLM Service
 class MockLLMService:

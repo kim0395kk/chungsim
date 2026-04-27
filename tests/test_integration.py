@@ -2,6 +2,8 @@
 import sys
 import os
 import shutil
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def test_rag_integration():

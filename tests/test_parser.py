@@ -1,6 +1,9 @@
 
 import os
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from civil_engineering.data_parser import parse_all_md_files, create_search_chunks  # noqa: E402
 
 def test_parser_backtest():
