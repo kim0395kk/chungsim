@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "streamlit-page-registry"
+version = "0.1.0a1"
+description = "Zero-config dynamic routing for production Streamlit apps — error isolation, introspection dispatch, and pre-flight validation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Mr Kim", email = "kim0395kms@gmail.com" }]
+keywords = [
+    "streamlit",
+    "router",
+    "registry",
+    "multipage",
+    "navigation",
+    "plugin",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "streamlit>=1.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov>=4",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/kim0395kk/streamlit-page-registry"
+Issues = "https://github.com/kim0395kk/streamlit-page-registry/issues"
+Source = "https://github.com/kim0395kk/streamlit-page-registry"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/streamlit_page_registry"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "tests/",
+    "examples/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
