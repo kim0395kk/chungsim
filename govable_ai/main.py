@@ -47,8 +47,7 @@ from govable_ai.ui.styles import apply_styles
 from govable_ai.ui.components import render_header, render_lawbot_button, render_agent_logs
 from govable_ai.ui.auth import sidebar_auth, render_history_list, is_admin_user
 from govable_ai.ui.dashboard import render_master_dashboard
-from govable_ai.ui.doc_compiler_page import render_doc_compiler_page
-from govable_ai.ui.pages.civil_engineering import render_civil_engineering_page
+from govable_ai.ui.pages import registry as pages_registry
 
 
 # =========================================================
@@ -275,31 +274,29 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("## 📌 메뉴")
 
-    PAGES = {
-        "workflow": "🧠 업무 처리",
-        "compiler": "📋 공문 컴파일",
-        "civil": "👷 토목 RAG",
-    }
-    for key, label in PAGES.items():
+    pages = pages_registry.all_pages()
+    for entry in pages:
         if st.sidebar.button(
-            label,
+            entry.label,
             use_container_width=True,
-            key=f"nav_{key}",
-            type="primary" if st.session_state.current_page == key else "secondary",
+            key=f"nav_{entry.key}",
+            type="primary" if st.session_state.current_page == entry.key else "secondary",
         ):
-            st.session_state.current_page = key
+            st.session_state.current_page = entry.key
             st.rerun()
 
-    st.sidebar.caption(f"📍 현재: {PAGES.get(st.session_state.current_page, '?')}")
+    current = pages_registry.get_page(st.session_state.current_page)
+    st.sidebar.caption(f"📍 현재: {current.label if current else '?'}")
 
     render_history_list(db)
 
-    # 페이지 라우팅 (workflow 외 페이지는 즉시 렌더링 후 반환)
-    if st.session_state.current_page == "compiler":
-        render_doc_compiler_page(llm)
-        return
-    if st.session_state.current_page == "civil":
-        render_civil_engineering_page(llm)
+    # 페이지 라우팅 — workflow 외 페이지는 registry 가 dispatch 후 종료.
+    if pages_registry.render(
+        st.session_state.current_page,
+        llm_service=llm,
+        db=db,
+        services=services,
+    ):
         return
     
     # 관리자 모드 체크
