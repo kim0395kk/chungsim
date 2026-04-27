@@ -274,18 +274,26 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("## 📌 메뉴")
 
-    pages = pages_registry.all_pages()
-    for entry in pages:
-        if st.sidebar.button(
-            entry.label,
-            use_container_width=True,
-            key=f"nav_{entry.key}",
-            type="primary" if st.session_state.current_page == entry.key else "secondary",
-        ):
-            st.session_state.current_page = entry.key
-            st.rerun()
+    grouped = pages_registry.pages_by_group()
+    current_key = st.session_state.current_page
+    for group_id, group_label in pages_registry.GROUP_LABELS.items():
+        entries = grouped.get(group_id) or []
+        if not entries:
+            continue
+        # 현재 활성 페이지가 속한 그룹은 펼쳐둔다.
+        is_active_group = any(e.key == current_key for e in entries)
+        with st.sidebar.expander(group_label, expanded=is_active_group):
+            for entry in entries:
+                if st.button(
+                    entry.label,
+                    use_container_width=True,
+                    key=f"nav_{entry.key}",
+                    type="primary" if current_key == entry.key else "secondary",
+                ):
+                    st.session_state.current_page = entry.key
+                    st.rerun()
 
-    current = pages_registry.get_page(st.session_state.current_page)
+    current = pages_registry.get_page(current_key)
     st.sidebar.caption(f"📍 현재: {current.label if current else '?'}")
 
     render_history_list(db)

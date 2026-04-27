@@ -38,6 +38,7 @@ class PageEntry:
     label: str               # 사이드바 버튼 라벨
     module: str              # 'govable_ai.ui.pages.civil_engineering'
     func: str = ""           # 진입 함수명. 비우면 'render_<key>_page' 자동 추론.
+    group: str = "core"      # 사이드바 그룹: 'core' | 'search' | 'meta'
 
     @property
     def function_name(self) -> str:
@@ -55,6 +56,14 @@ class PageEntry:
         return fn
 
 
+# 사이드바에 표시할 그룹 라벨 (등록부 순서를 보존하기 위해 dict 순서 사용).
+GROUP_LABELS: dict[str, str] = {
+    "core": "🧠 핵심 업무",
+    "search": "🔎 검색 / RAG",
+    "meta": "⚙️ 운영 / 메타",
+}
+
+
 # =============================================================================
 # 페이지 등록부 — 새 페이지는 여기 한 줄만 추가하면 됨.
 # =============================================================================
@@ -65,30 +74,35 @@ _REGISTRY: list[PageEntry] = [
         label="🧠 업무 처리",
         module="govable_ai.main",
         func="_render_workflow_page",  # main.py 의 기본 워크플로우 (특수 케이스)
+        group="core",
     ),
     PageEntry(
         key="compiler",
         label="📋 공문 컴파일",
         module="govable_ai.ui.doc_compiler_page",
         func="render_doc_compiler_page",
+        group="core",
     ),
     PageEntry(
         key="revision",
         label="📝 기안문 수정",
         module="govable_ai.ui.pages.document_revision",
         func="render_document_revision_page",
+        group="core",
     ),
     PageEntry(
         key="complaint",
         label="🧾 민원 분석기",
         module="govable_ai.ui.pages.complaint_analyzer",
         func="render_complaint_analyzer_page",
+        group="core",
     ),
     PageEntry(
         key="hallucination",
         label="🔍 환각 검사",
         module="govable_ai.ui.pages.hallucination_check",
         func="render_hallucination_check_page",
+        group="core",
     ),
     # --- Search / RAG ---
     PageEntry(
@@ -96,12 +110,14 @@ _REGISTRY: list[PageEntry] = [
         label="👷 토목 RAG",
         module="govable_ai.ui.pages.civil_engineering",
         func="render_civil_engineering_page",
+        group="search",
     ),
     PageEntry(
         key="duty",
         label="📚 업무편람",
         module="govable_ai.ui.pages.duty_manual",
         func="render_duty_manual_page",
+        group="search",
     ),
     # --- Meta / 운영 ---
     PageEntry(
@@ -109,20 +125,64 @@ _REGISTRY: list[PageEntry] = [
         label="🗂️ 작업 이력",
         module="govable_ai.ui.pages.archive_history",
         func="render_archive_history_page",
+        group="meta",
     ),
     PageEntry(
         key="health",
         label="🩺 시스템 상태",
         module="govable_ai.ui.pages.service_health",
         func="render_service_health_page",
+        group="meta",
     ),
     PageEntry(
         key="dashboard",
         label="🏛️ 마스터 대시보드",
         module="govable_ai.ui.pages.master_dashboard",
         func="render_master_dashboard_page",
+        group="meta",
     ),
 ]
+
+
+def pages_by_group() -> dict[str, list[PageEntry]]:
+    """그룹별로 페이지 항목을 묶어 반환 (사이드바 렌더링용)."""
+    out: dict[str, list[PageEntry]] = {g: [] for g in GROUP_LABELS}
+    for p in _REGISTRY:
+        out.setdefault(p.group, []).append(p)
+    return out
+
+
+def validate_all() -> list[str]:
+    """모든 등록 페이지의 lazy import + 시그니처를 검증한다.
+
+    개발/배포 시 한 번만 호출하면 IDE 가 잡지 못한 시그니처 오류를 조기에 발견한다.
+    워크플로우 페이지는 main.py 안에서 직접 그려지므로 검증 대상에서 제외.
+
+    Returns:
+        에러 메시지 리스트. 비어 있으면 모두 정상.
+    """
+    errors: list[str] = []
+    for p in _REGISTRY:
+        if p.key == "workflow":
+            continue
+        try:
+            fn = p.load()
+            sig = inspect.signature(fn)
+            params = sig.parameters
+            has_var_kw = any(
+                v.kind == inspect.Parameter.VAR_KEYWORD for v in params.values()
+            )
+            if not has_var_kw:
+                # 표준 인터페이스 권장 인자 중 적어도 하나는 받아야 한다.
+                expected = {"llm_service", "llm", "db", "services"}
+                if not (set(params) & expected):
+                    errors.append(
+                        f"{p.key}: {p.module}:{p.function_name} signature "
+                        f"({', '.join(params)}) accepts none of {sorted(expected)}"
+                    )
+        except Exception as e:
+            errors.append(f"{p.key}: {type(e).__name__}: {e}")
+    return errors
 
 
 def all_pages() -> list[PageEntry]:
