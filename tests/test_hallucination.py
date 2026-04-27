@@ -1,9 +1,6 @@
 """
 환각 탐지 기능 테스트 스크립트
 """
-import sys
-sys.path.insert(0, r'c:\Users\Mr Kim\Desktop\chungsim')
-
 from hallucination_detection import (
     detect_hallucination,
     _detect_by_patterns,

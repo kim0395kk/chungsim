@@ -1,9 +1,6 @@
 """
 기안문 수정 기능 테스트 스크립트
 """
-import sys
-sys.path.insert(0, r'c:\Users\Mr Kim\Desktop\chungsim')
-
 from govable_ai.features.document_revision import run_revision_workflow
 
 # Mock LLM Service

@@ -1,7 +1,7 @@
 
 import os
 import sys
-from civil_engineering.data_parser import parse_all_md_files, create_search_chunks
+from civil_engineering.data_parser import parse_all_md_files, create_search_chunks  # noqa: E402
 
 def test_parser_backtest():
     print("Testing Data Parser Back-test...")

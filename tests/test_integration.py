@@ -3,8 +3,6 @@ import sys
 import os
 import shutil
 
-# App 경로 추가
-sys.path.append(os.getcwd())
 
 def test_rag_integration():
     print("Testing Civil Engineering RAG Integration...")
