@@ -68,12 +68,24 @@ def _render_response_panel(payload: dict) -> None:
             st.caption("질문과 직접 매칭된 구조화 데이터가 없습니다.")
 
 
+@st.cache_resource(show_spinner="📚 토목 매뉴얼 인덱스 로딩 중... (최초 1회)")
+def _load_rag_cached() -> Optional[Any]:
+    """heavy 한 RAG 인덱스를 세션 전체에서 1회만 로드한다.
+
+    Streamlit 의 @st.cache_resource 는 프로세스 단위 싱글톤이라 여러 사용자
+    세션 간에도 공유된다. 데이터/벡터 변경 시에는 앱 재시작 필요.
+    """
+    if load_rag_system is None:
+        return None
+    return load_rag_system()
+
+
 def _get_rag() -> Optional[Any]:
-    """RAG 시스템을 로드한다. 의존성 누락 시 None."""
+    """RAG 시스템을 가져온다. 의존성 누락이나 초기화 실패 시 None."""
     if load_rag_system is None:
         return None
     try:
-        return load_rag_system()
+        return _load_rag_cached()
     except Exception as e:
         st.error(f"RAG 시스템 초기화 실패: {e}")
         return None
